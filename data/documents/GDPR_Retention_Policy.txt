@@ -1,0 +1,33 @@
+# GDPR Data Retention Policy
+
+**Document ID:** POL-COMP-001  
+**Classification:** Compliance Records
+
+## Purpose
+
+This policy defines retention periods and procedures for customer personal data in compliance with GDPR and applicable regulations.
+
+## Retention Periods
+
+| Data Category | Retention Period | Legal Basis |
+|---------------|------------------|-------------|
+| Customer account data | 7 years after account closure | Legal obligation |
+| Transaction records | 7 years | Financial regulations |
+| Marketing preferences | 3 years or until consent withdrawn | Legitimate interest |
+| Support tickets | 2 years | Legitimate interest |
+| Website analytics (anonymized) | 26 months | Legitimate interest |
+
+## Right to Erasure
+
+Customers may request deletion of personal data. Requests must be:
+- Verified within 5 business days
+- Processed within 30 calendar days
+- Documented in the compliance tracking system
+
+## Data Minimization
+
+Collect only data necessary for the stated purpose. Review data collection forms annually.
+
+## Breach Notification
+
+Report personal data breaches to the DPO within 24 hours. Notify supervisory authority within 72 hours if required.

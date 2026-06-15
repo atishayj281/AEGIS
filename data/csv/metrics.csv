@@ -1,0 +1,3 @@
+server_id,cpu_percent,status
+prod-1,90,critical
+prod-2,50,ok

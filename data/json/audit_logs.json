@@ -1,0 +1,66 @@
+[
+  {
+    "timestamp": "2026-01-14T08:15:22Z",
+    "event_type": "login_failed",
+    "username": "jsmith",
+    "source_ip": "203.0.113.45",
+    "reason": "invalid_password",
+    "severity": "medium"
+  },
+  {
+    "timestamp": "2026-01-14T08:16:01Z",
+    "event_type": "login_failed",
+    "username": "jsmith",
+    "source_ip": "203.0.113.45",
+    "reason": "invalid_password",
+    "severity": "medium"
+  },
+  {
+    "timestamp": "2026-01-14T09:30:00Z",
+    "event_type": "login_failed",
+    "username": "admin",
+    "source_ip": "198.51.100.22",
+    "reason": "account_locked",
+    "severity": "high"
+  },
+  {
+    "timestamp": "2026-01-14T10:45:33Z",
+    "event_type": "login_success",
+    "username": "compliance_officer",
+    "source_ip": "10.0.1.50",
+    "reason": null,
+    "severity": "info"
+  },
+  {
+    "timestamp": "2026-01-14T11:02:18Z",
+    "event_type": "login_failed",
+    "username": "unknown_user",
+    "source_ip": "192.0.2.100",
+    "reason": "user_not_found",
+    "severity": "low"
+  },
+  {
+    "timestamp": "2026-01-14T14:22:45Z",
+    "event_type": "login_failed",
+    "username": "finance_analyst",
+    "source_ip": "10.0.2.15",
+    "reason": "mfa_failed",
+    "severity": "medium"
+  },
+  {
+    "timestamp": "2026-01-14T22:10:00Z",
+    "event_type": "login_failed",
+    "username": "contractor_01",
+    "source_ip": "203.0.113.88",
+    "reason": "expired_credentials",
+    "severity": "medium"
+  },
+  {
+    "timestamp": "2026-01-14T23:55:12Z",
+    "event_type": "login_failed",
+    "username": "admin",
+    "source_ip": "198.51.100.22",
+    "reason": "invalid_password",
+    "severity": "high"
+  }
+]

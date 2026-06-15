@@ -1,0 +1,12 @@
+date,server_id,cpu_percent,memory_percent,disk_percent,status
+2026-01-10,prod-web-01,72,65,45,healthy
+2026-01-11,prod-web-01,92,78,46,critical
+2026-01-12,prod-web-01,68,62,47,healthy
+2026-01-10,prod-db-02,55,82,60,healthy
+2026-01-11,prod-db-02,88,85,61,critical
+2026-01-12,prod-db-02,52,80,62,healthy
+2026-01-10,prod-api-03,45,55,30,healthy
+2026-01-11,prod-api-03,87,70,31,critical
+2026-01-12,prod-api-03,42,52,32,healthy
+2026-01-10,staging-web-01,25,40,20,healthy
+2026-01-11,staging-web-01,30,42,21,healthy

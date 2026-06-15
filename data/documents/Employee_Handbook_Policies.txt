@@ -1,0 +1,29 @@
+# Employee Handbook - Public Policies
+
+**Effective Date:** 01-Jan-2026  
+**Classification:** Public - All Employees
+
+## Remote Work Policy
+
+Employees may work remotely up to 3 days per week with manager approval. Core collaboration hours are 10:00 AM - 3:00 PM local time.
+
+## Data Security Policy
+
+- Never share passwords or API keys via email or chat
+- Use company-approved VPN when accessing internal systems remotely
+- Report suspected security incidents within 1 hour to security@company.com
+- Lock workstations when leaving desk
+
+## Code of Conduct
+
+All employees must maintain professional behavior, respect confidentiality of internal documentation, and follow applicable laws and regulations.
+
+## Expense Reimbursement
+
+Submit expense reports within 30 days. Receipts required for expenses over $25.
+
+## Leave Policy
+
+- Annual leave: 20 days per year
+- Sick leave: 10 days per year
+- Parental leave: per local regulations

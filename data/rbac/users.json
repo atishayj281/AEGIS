@@ -1,0 +1,32 @@
+[
+  {
+    "username": "admin_user",
+    "password": "admin123",
+    "role": "admin",
+    "department": "IT Administration"
+  },
+  {
+    "username": "compliance_officer",
+    "password": "compliance123",
+    "role": "compliance_officer",
+    "department": "Compliance"
+  },
+  {
+    "username": "finance_analyst",
+    "password": "finance123",
+    "role": "finance_analyst",
+    "department": "Finance"
+  },
+  {
+    "username": "ops_engineer",
+    "password": "ops123",
+    "role": "operations_engineer",
+    "department": "Operations"
+  },
+  {
+    "username": "employee_user",
+    "password": "employee123",
+    "role": "employee",
+    "department": "General"
+  }
+]
