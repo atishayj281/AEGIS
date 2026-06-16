@@ -50,7 +50,7 @@ The platform operates on a single unified architecture integrating the secure fi
          v                      v                      v         |
  +-------+-------+      +-------+-------+      +-------+-------+ |
  | Vector Store  |      | SQL Database  |      |   JSON Logs   | |
- | (ChromaDB)    |      | (SQLite)      |      | (Audit/Log)   | |
+ | (Milvus)      |      | (SQLite)      |      | (Audit/Log)   | |
  +--+---------+--+      +-------+-------+      +-------+-------+ |
     ^         |                 |                      |         |
     |         +--------+        |        +-------------+         |
@@ -156,7 +156,7 @@ curl -X POST http://localhost:8000/api/v1/document/upload \
   -F "file=@/path/to/policy.pdf" \
   -F "data_source=compliance_records"
 ```
-*Note: Supported formats include PDF, DOCX, TXT, CSV, XLSX/XLS, JSON, PNG, JPG, and JPEG. Files are saved locally and immediately parsed, chunked, and embedded into ChromaDB.*
+*Note: Supported formats include PDF, DOCX, TXT, CSV, XLSX/XLS, JSON, PNG, JPG, and JPEG. Files are saved locally and immediately parsed, chunked, and embedded into Milvus.*
 
 ### 4. List Demo Users
 
@@ -168,7 +168,7 @@ curl -X GET http://localhost:8000/api/v1/auth/demo-users
 
 ### 5. Health Check
 
-Returns health status of the application, version number, count of currently indexed document chunks in ChromaDB, and active data sources.
+Returns health status of the application, version number, count of currently indexed document chunks in Milvus, and active data sources.
 
 ```bash
 curl -X GET http://localhost:8000/api/v1/health
@@ -237,7 +237,7 @@ OPENAI_MODEL=gpt-4o-mini
 
 ## Design Decisions
 
-1. **ChromaDB** for local vector search — unified semantic indexing of PDFs, DOCX, text logs, CSV rows, Excel files, JSON records, and Image metadata.
+1. **Milvus** for local vector search — unified semantic indexing of PDFs, DOCX, text logs, CSV rows, Excel files, JSON records, and Image metadata.
 2. **SQLite** for structured data — portable, zero-config SQL backend
 3. **Rule-based intent classification** — deterministic, explainable routing (extensible to ML models)
 4. **Hybrid retrieval** — combines semantic, keyword re-ranking, and structured queries

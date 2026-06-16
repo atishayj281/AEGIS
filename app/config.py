@@ -11,7 +11,7 @@ class Settings(BaseSettings):
     app_name: str = "Enterprise RAG Intelligence Platform"
     debug: bool = True
     data_dir: Path = Path("./data")
-    chroma_persist_dir: Path = Path("./data/chroma_db")
+    milvus_db_path: Path = Path("./data/milvus.db")
     sqlite_path: Path = Path("./data/enterprise.db")
     audit_log_path: Path = Path("./data/audit.log")
 
