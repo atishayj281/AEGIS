@@ -18,6 +18,8 @@ class Settings(BaseSettings):
     qdrant_url: str = "https://e3373a68-cdad-4410-88c3-488c5f5d87a5.us-west-1-0.aws.cloud.qdrant.io:6333" 
     qdrant_api_key: str = os.getenv("QDRANT_API_KEY")
 
+    nvidia_api_key: str = os.getenv("NVIDIA_API_KEY")
+
     jwt_secret_key: str = "dev-secret-change-in-production"
     jwt_algorithm: str = "HS256"
     jwt_expire_minutes: int = 60
