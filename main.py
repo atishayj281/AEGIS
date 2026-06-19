@@ -15,10 +15,6 @@ from app.retrieval.vector_store import VectorStore
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     settings = get_settings()
-    vector_store = VectorStore(settings)
-    if vector_store.document_count == 0:
-        count = vector_store.ingest_documents()
-        print(f"Ingested {count} document chunks into vector store")
     SQLRetriever(settings)
     print("Enterprise RAG Platform initialized")
     yield
