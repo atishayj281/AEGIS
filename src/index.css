@@ -1,0 +1,365 @@
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
+
+:root {
+  /* Premium Dark Theme Palette */
+  --bg-main: #06090e;
+  --bg-sidebar: #0b0f17;
+  --bg-panel: #0e1420;
+  --bg-panel-hover: #151c2c;
+  --bg-input: #121824;
+  --border-color: #1e293b;
+  --border-color-soft: #141c2c;
+  
+  /* Text colors */
+  --text-main: #f1f5f9;
+  --text-muted: #94a3b8;
+  --text-dark: #64748b;
+  
+  /* Accents */
+  --color-gold: #e2b857;
+  --color-gold-glow: rgba(226, 184, 87, 0.15);
+  --color-teal: #38bdf8;
+  --color-teal-glow: rgba(56, 189, 248, 0.15);
+  --color-success: #10b981;
+  --color-success-glow: rgba(16, 185, 129, 0.15);
+  --color-danger: #ef4444;
+  --color-danger-glow: rgba(239, 68, 68, 0.15);
+  --color-info: #0284c7;
+  --color-info-glow: rgba(2, 132, 199, 0.15);
+  
+  /* Layout sizes */
+  --sidebar-width: 260px;
+  --border-radius: 12px;
+  --transition-speed: 0.2s;
+  
+  /* Shadows */
+  --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.2);
+  --shadow-md: 0 4px 20px rgba(0, 0, 0, 0.4);
+  --shadow-glow: 0 0 15px var(--color-gold-glow);
+}
+
+/* Base resets */
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background-color: var(--bg-main);
+  color: var(--text-main);
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+  overflow-x: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Custom Scrollbars */
+.aegis-scroll::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.aegis-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.aegis-scroll::-webkit-scrollbar-thumb {
+  background: var(--border-color);
+  border-radius: 999px;
+}
+
+.aegis-scroll::-webkit-scrollbar-thumb:hover {
+  background: var(--text-dark);
+}
+
+/* Typography styles */
+.aegis-display {
+  font-family: 'Space Grotesk', sans-serif;
+  letter-spacing: -0.01em;
+}
+
+.aegis-mono {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.9em;
+}
+
+/* Animations */
+@keyframes aegisFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes aegisSpin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes pulseGlow {
+  0%, 100% {
+    box-shadow: 0 0 10px rgba(226, 184, 87, 0.05);
+  }
+  50% {
+    box-shadow: 0 0 20px var(--color-gold-glow);
+  }
+}
+
+.aegis-fade-in {
+  animation: aegisFadeIn 0.3s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.aegis-spin {
+  animation: aegisSpin 0.9s linear infinite;
+}
+
+.aegis-stamp {
+  transform: rotate(-6deg);
+  text-shadow: 0 0 8px currentColor;
+}
+
+.aegis-glow-pulse {
+  animation: pulseGlow 3s infinite ease-in-out;
+}
+
+/* Buttons */
+.aegis-btn {
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 10px 16px;
+  border-radius: var(--border-radius);
+  border: 1px solid var(--border-color);
+  background: var(--bg-panel);
+  color: var(--text-main);
+  cursor: pointer;
+  transition: all var(--transition-speed) ease;
+  user-select: none;
+}
+
+.aegis-btn:hover:not(:disabled) {
+  background: var(--bg-panel-hover);
+  border-color: var(--text-dark);
+}
+
+.aegis-btn:active:not(:disabled) {
+  transform: scale(0.98);
+}
+
+.aegis-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.aegis-btn-primary {
+  background: var(--color-gold-glow);
+  border-color: rgba(226, 184, 87, 0.4);
+  color: var(--color-gold);
+}
+
+.aegis-btn-primary:hover:not(:disabled) {
+  background: rgba(226, 184, 87, 0.25);
+  border-color: var(--color-gold);
+  box-shadow: 0 0 12px var(--color-gold-glow);
+}
+
+.aegis-btn-danger {
+  background: var(--color-danger-glow);
+  border-color: rgba(239, 68, 68, 0.4);
+  color: var(--color-danger);
+}
+
+.aegis-btn-danger:hover:not(:disabled) {
+  background: rgba(239, 68, 68, 0.25);
+  border-color: var(--color-danger);
+  box-shadow: 0 0 12px var(--color-danger-glow);
+}
+
+/* Inputs and Forms */
+.aegis-input,
+.aegis-select,
+.aegis-textarea {
+  font-family: inherit;
+  font-size: 13px;
+  color: var(--text-main);
+  background: var(--bg-input);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 10px 14px;
+  width: 100%;
+  transition: all var(--transition-speed) ease;
+}
+
+.aegis-input:focus,
+.aegis-select:focus,
+.aegis-textarea:focus {
+  outline: none;
+  border-color: var(--color-gold);
+  box-shadow: 0 0 8px var(--color-gold-glow);
+}
+
+.aegis-input::placeholder,
+.aegis-textarea::placeholder {
+  color: var(--text-dark);
+}
+
+.aegis-focus:focus-visible {
+  outline: 2px solid var(--color-gold);
+  outline-offset: 2px;
+}
+
+/* Grid & Rows */
+.aegis-row {
+  transition: background-color var(--transition-speed) ease;
+}
+
+.aegis-row:hover {
+  background-color: var(--bg-panel-hover);
+}
+
+/* Ticket tear effect */
+.aegis-ticket {
+  position: relative;
+}
+
+.aegis-ticket::before, .aegis-ticket::after {
+  content: "";
+  position: absolute;
+  width: 16px;
+  height: 16px;
+  background: var(--bg-main);
+  border-radius: 50%;
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+.aegis-ticket::before {
+  left: -8px;
+}
+
+.aegis-ticket::after {
+  right: -8px;
+}
+
+/* Sidebar & Navigation */
+.aegis-sidebar-link {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  border-radius: 8px;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-family: inherit;
+  font-size: 13.5px;
+  font-weight: 500;
+  text-align: left;
+  cursor: pointer;
+  transition: all var(--transition-speed) ease;
+}
+
+.aegis-sidebar-link:hover {
+  background: var(--bg-panel-hover);
+  color: var(--text-main);
+}
+
+.aegis-sidebar-link.active {
+  background: var(--bg-panel);
+  color: var(--text-main);
+  font-weight: 600;
+}
+
+/* Stats Cards */
+.aegis-stat-card {
+  background: var(--bg-panel);
+  border: 1px solid var(--border-color);
+  border-radius: var(--border-radius);
+  padding: 16px 20px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  transition: transform var(--transition-speed) ease, border-color var(--transition-speed) ease;
+}
+
+.aegis-stat-card:hover {
+  transform: translateY(-2px);
+  border-color: var(--text-dark);
+}
+
+/* Modal Layout */
+.aegis-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(4, 6, 10, 0.85);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 50;
+  padding: 16px;
+}
+
+.aegis-modal-content {
+  background: var(--bg-panel);
+  border: 1px solid var(--border-color);
+  border-radius: 16px;
+  padding: 24px;
+  width: 100%;
+  box-shadow: var(--shadow-md);
+  animation: aegisFadeIn 0.3s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+/* Dropzone for uploads */
+.aegis-dropzone {
+  border: 2px dashed var(--border-color);
+  border-radius: var(--border-radius);
+  background: var(--bg-input);
+  padding: 30px 20px;
+  text-align: center;
+  cursor: pointer;
+  transition: all var(--transition-speed) ease;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}
+
+.aegis-dropzone:hover,
+.aegis-dropzone.active {
+  border-color: var(--color-gold);
+  background: var(--bg-panel-hover);
+}
+
+/* Custom Table Header & Structure */
+.aegis-table-container {
+  border: 1px solid var(--border-color-soft);
+  border-radius: var(--border-radius);
+  overflow: hidden;
+}
+
+.aegis-table-header {
+  background: var(--bg-panel-hover);
+  border-bottom: 1px solid var(--border-color);
+}
+
+/* suggestions layout */
+.aegis-suggestion-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 10px;
+  width: 100%;
+  max-width: 720px;
+  margin: 0 auto;
+}
