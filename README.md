@@ -199,7 +199,7 @@ npm run build      # Production build in /build
 
 ## Related
 
-- **Backend** → [`enterprise-rag-handler`](../enterprise-rag-handler/README.md) — FastAPI + Milvus + SQLite RAG pipeline
+- **Backend** → [`enterprise-rag-handler`](https://github.com/atishayj281/AEGIS/tree/aegis-handler) — FastAPI + Milvus + SQLite RAG pipeline
 - **GitHub** → [atishayj281/AEGIS](https://github.com/atishayj281/AEGIS) (branch: `aegis-client`)
 
 ---
