@@ -14,10 +14,22 @@ pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 
 class User:
-    def __init__(self, username: str, role: UserRole, department: str):
+    def __init__(
+        self,
+        username: str,
+        role: UserRole,
+        department: str,
+        org_id: str | None = None,
+        team_ids: list[str] | None = None,
+        roles: dict[str, str] | None = None,
+    ):
         self.username = username
         self.role = role
         self.department = department
+        self.org_id = org_id
+        self.team_ids = team_ids or []
+        self.roles = roles or {}
+
 
 
 class AuthService:

@@ -24,12 +24,22 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     jwt_expire_minutes: int = 60
 
+    auth_provider: str = os.getenv("AUTH_PROVIDER", "legacy")
+    auth0_domain: str = os.getenv("AUTH0_DOMAIN", "your-tenant.auth0.com")
+    auth0_audience: str = os.getenv("AUTH0_AUDIENCE", "https://your-api-audience")
+    auth0_client_id: str = os.getenv("AUTH0_CLIENT_ID", "your-auth0-client-id")
+    internal_secret: str = os.getenv("INTERNAL_SECRET", "dev-internal-secret-token-key-12345")
+
     openai_api_key: str | None = None
     openai_model: str = "gpt-4o-mini"
 
     max_retrieval_results: int = 8
     retrieval_timeout_seconds: float = 2.0
     query_timeout_seconds: float = 5.0
+
+    # Conversation history settings
+    conversation_max_turns: int = 20
+    conversation_session_ttl_minutes: int = 60
 
 
 @lru_cache
