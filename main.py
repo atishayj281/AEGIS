@@ -40,8 +40,7 @@ app.add_middleware(
 
 app.include_router(router, prefix="/api/v1", tags=["RAG"])
 
-from app.api.internal import router as internal_router
-app.include_router(internal_router, tags=["Internal"])
+
 
 
 @app.get("/")

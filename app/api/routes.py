@@ -5,21 +5,18 @@ from pathlib import Path
 
 from app import __version__
 from app.api.deps import (
-    get_auth_service,
     get_current_user,
     get_pipeline,
     get_vector_store,
     get_conversation_manager_dep,
 )
-from app.auth.jwt_auth import AuthService, User
+from app.auth.jwt_auth import User
 from app.models.schemas import (
     AccessDeniedResponse,
     HealthResponse,
     QueryRequest,
     QueryResponse,
     SecurityViolationResponse,
-    TokenRequest,
-    TokenResponse,
     UploadResponse,
     SessionInfoResponse,
     ConversationTurnSchema,
@@ -32,21 +29,7 @@ from app.conversation.manager import ConversationManager
 router = APIRouter()
 
 
-@router.post("/auth/token", response_model=TokenResponse)
-async def login(request: TokenRequest, auth: AuthService = Depends(get_auth_service)):
-    user = auth.authenticate(request.username, request.password)
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid username or password",
-        )
-    token, expires_in = auth.create_token(user)
-    return TokenResponse(access_token=token, role=user.role, expires_in=expires_in)
 
-
-@router.get("/auth/demo-users")
-async def list_demo_users(auth: AuthService = Depends(get_auth_service)):
-    return {"users": auth.list_demo_users(), "note": "Demo credentials for evaluation only"}
 
 
 @router.post(

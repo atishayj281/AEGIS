@@ -5,6 +5,7 @@ import sys
 import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 import pytest
 from fastapi import status
@@ -12,7 +13,7 @@ from fastapi.testclient import TestClient
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from app.api.deps import get_auth_service, get_conversation_manager_dep
+from app.api.deps import get_conversation_manager_dep
 from app.auth.jwt_auth import User
 from app.conversation.manager import ConversationManager, ConversationTurn, get_conversation_manager
 from app.models.domain import UserRole
@@ -20,22 +21,49 @@ from main import app
 
 client = TestClient(app)
 
+# --- JWKS mock payloads -------------------------------------------------------
+_CONV_TOKEN_PAYLOADS = {
+    "alice_token": {
+        "user_id": "alice",
+        "org_id": "org_test",
+        "team_ids": ["team_hr"],
+        "roles": {"team_hr": "employee"},
+    },
+    "bob_token": {
+        "user_id": "bob",
+        "org_id": "org_test",
+        "team_ids": ["team_hr"],
+        "roles": {"team_hr": "employee"},
+    },
+}
+
+
+@pytest.fixture(autouse=True)
+def mock_jwks_conv():
+    """Patch JWKS verification so conversation tests don't hit the network."""
+    def decode_side_effect(token, key, algorithms, audience, issuer):
+        if token in _CONV_TOKEN_PAYLOADS:
+            return _CONV_TOKEN_PAYLOADS[token]
+        import jwt as jwt_lib
+        raise jwt_lib.InvalidSignatureError("Signature verification failed")
+
+    mock_key = MagicMock()
+    mock_key.key = "fake-public-key"
+    mock_client = MagicMock()
+    mock_client.get_signing_key_from_jwt.return_value = mock_key
+
+    with (
+        patch("app.auth.auth0_verify.jwt.PyJWKClient", return_value=mock_client),
+        patch("app.auth.auth0_verify.jwt.decode", side_effect=decode_side_effect),
+    ):
+        yield
+
 
 @pytest.fixture
 def auth_headers():
-    auth = get_auth_service()
-
-    # User Alice (Employee)
-    alice = User("alice", UserRole.EMPLOYEE, "HR")
-    alice_token, _ = auth.create_token(alice)
-
-    # User Bob (Employee)
-    bob = User("bob", UserRole.EMPLOYEE, "HR")
-    bob_token, _ = auth.create_token(bob)
-
     return {
-        "alice": {"Authorization": f"Bearer {alice_token}"},
-        "bob": {"Authorization": f"Bearer {bob_token}"},
+        "alice": {"Authorization": "Bearer alice_token"},
+        "bob": {"Authorization": "Bearer bob_token"},
     }
 
 

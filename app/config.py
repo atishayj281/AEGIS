@@ -15,20 +15,15 @@ class Settings(BaseSettings):
     sqlite_path: Path = Path("./data/enterprise.db")
     audit_log_path: Path = Path("./data/audit.log")
 
-    qdrant_url: str = "https://e3373a68-cdad-4410-88c3-488c5f5d87a5.us-west-1-0.aws.cloud.qdrant.io:6333" 
+    qdrant_url: str = "https://e3373a68-cdad-4410-88c3-488c5f5d87a5.us-west-1-0.aws.cloud.qdrant.io:6333"
     qdrant_api_key: str = os.getenv("QDRANT_API_KEY")
 
     nvidia_api_key: str = os.getenv("NVIDIA_API_KEY")
 
-    jwt_secret_key: str = "dev-secret-change-in-production"
-    jwt_algorithm: str = "HS256"
-    jwt_expire_minutes: int = 60
-
-    auth_provider: str = os.getenv("AUTH_PROVIDER", "legacy")
+    # Auth0 — used to verify RS256 JWTs issued by the frontend Auth0 tenant.
+    # The frontend handles login; the backend only validates the access_token.
     auth0_domain: str = os.getenv("AUTH0_DOMAIN", "your-tenant.auth0.com")
     auth0_audience: str = os.getenv("AUTH0_AUDIENCE", "https://your-api-audience")
-    auth0_client_id: str = os.getenv("AUTH0_CLIENT_ID", "your-auth0-client-id")
-    internal_secret: str = os.getenv("INTERNAL_SECRET", "dev-internal-secret-token-key-12345")
 
     openai_api_key: str | None = None
     openai_model: str = "gpt-4o-mini"

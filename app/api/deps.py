@@ -1,27 +1,29 @@
-"""FastAPI dependencies."""
+"""FastAPI dependencies.
 
+Authentication: the frontend obtains an Auth0 access_token and sends it as
+    Authorization: Bearer <token>
+The backend verifies the RS256 signature via Auth0's JWKS endpoint and maps
+custom claims to a User object. No login endpoint or token issuance exists
+on the backend.
+"""
+
+import jwt
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
-from app.auth.jwt_auth import AuthService, User
+from app.auth.auth0_verify import verify_token
+from app.auth.jwt_auth import User
 from app.config import get_settings
+from app.models.domain import UserRole
 from app.pipeline import RAGPipeline
 from app.retrieval.vector_store import VectorStore
 from app.conversation.manager import ConversationManager, get_conversation_manager
 
 security = HTTPBearer()
 
-_auth_service: AuthService | None = None
 _pipeline: RAGPipeline | None = None
 _vector_store: VectorStore | None = None
 _conversation_manager: ConversationManager | None = None
-
-
-def get_auth_service() -> AuthService:
-    global _auth_service
-    if _auth_service is None:
-        _auth_service = AuthService(get_settings())
-    return _auth_service
 
 
 def get_vector_store() -> VectorStore:
@@ -45,62 +47,52 @@ def get_conversation_manager_dep() -> ConversationManager:
 def get_pipeline() -> RAGPipeline:
     global _pipeline
     if _pipeline is None:
-        # Initialise conversation manager with settings first
         get_conversation_manager_dep()
         _pipeline = RAGPipeline()
     return _pipeline
 
 
+def _map_roles_to_user_role(roles_claim: dict) -> UserRole:
+    """Map Auth0 custom roles dict (team_id → role_name) to a single UserRole.
+
+    Priority order mirrors the RBAC permission hierarchy.
+    """
+    values = set(roles_claim.values())
+    if "admin" in values or "org_admin" in values:
+        return UserRole.ADMIN
+    if "compliance_officer" in values:
+        return UserRole.COMPLIANCE_OFFICER
+    if "finance_analyst" in values:
+        return UserRole.FINANCE_ANALYST
+    if "operations_engineer" in values:
+        return UserRole.OPERATIONS_ENGINEER
+    return UserRole.EMPLOYEE
+
+
 async def get_current_user(
     credentials: HTTPAuthorizationCredentials = Depends(security),
-    auth: AuthService = Depends(get_auth_service),
 ) -> User:
-    settings = get_settings()
-    if getattr(settings, "auth_provider", "legacy") == "auth0":
-        from app.auth.auth0_verify import verify_token
-        from app.models.domain import UserRole
-        import jwt
+    """Verify the Auth0 Bearer token and return the authenticated User.
 
-        try:
-            payload = verify_token(credentials.credentials)
-            
-            # Map roles dict (team_id -> role) to UserRole
-            roles_claim = payload.get("roles") or {}
-            values = set(roles_claim.values())
-            
-            if "admin" in values or "org_admin" in values:
-                role = UserRole.ADMIN
-            elif "compliance_officer" in values:
-                role = UserRole.COMPLIANCE_OFFICER
-            elif "finance_analyst" in values:
-                role = UserRole.FINANCE_ANALYST
-            elif "operations_engineer" in values:
-                role = UserRole.OPERATIONS_ENGINEER
-            elif "employee" in values:
-                role = UserRole.EMPLOYEE
-            else:
-                role = UserRole.EMPLOYEE
-                
-            return User(
-                username=payload.get("user_id", "unknown"),
-                role=role,
-                department="General",
-                org_id=payload.get("org_id"),
-                team_ids=payload.get("team_ids"),
-                roles=payload.get("roles")
-            )
-        except jwt.PyJWTError as e:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail=f"Invalid or expired Auth0 token: {str(e)}",
-                headers={"WWW-Authenticate": "Bearer"},
-            ) from e
-    else:
-        user = auth.decode_token(credentials.credentials)
-        if not user:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid or expired token",
-                headers={"WWW-Authenticate": "Bearer"},
-            )
-        return user
+    The frontend is responsible for obtaining the token from Auth0.
+    This dependency only validates the RS256 signature via JWKS and
+    maps the claims to a User object — it never issues tokens itself.
+    """
+    try:
+        payload = verify_token(credentials.credentials)
+    except jwt.PyJWTError as e:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=f"Invalid or expired token: {str(e)}",
+            headers={"WWW-Authenticate": "Bearer"},
+        ) from e
+
+    roles_claim = payload.get("roles") or {}
+    return User(
+        username=payload.get("user_id", "unknown"),
+        role=_map_roles_to_user_role(roles_claim),
+        department="General",
+        org_id=payload.get("org_id"),
+        team_ids=payload.get("team_ids", []),
+        roles=roles_claim,
+    )

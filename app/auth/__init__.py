@@ -1,9 +1,5 @@
-"""Central auth exports and provider configurations."""
+"""Auth package.
 
-import os
-from app.config import get_settings
-
-def get_auth_provider() -> str:
-    """Return the currently configured AUTH_PROVIDER ('legacy' or 'auth0')."""
-    settings = get_settings()
-    return getattr(settings, "auth_provider", "legacy")
+Authentication is handled on the frontend via Auth0.
+The backend verifies RS256 JWTs using JWKS (see auth0_verify.py).
+"""

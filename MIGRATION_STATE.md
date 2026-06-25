@@ -1,7 +1,7 @@
 # Migration State
 
-Last updated: 2026-06-25T11:14:23Z
-Current phase: phase_1
+Last updated: 2026-06-25T11:22:00Z
+Current phase: phase_1 — complete, phase_2 ready_to_start
 
 ## Discovery Notes
 
@@ -27,8 +27,8 @@ Current phase: phase_1
 
 | Phase | Status | Branch | Merge commit | Notes |
 |-------|--------|--------|---------------|-------|
-| 1 — Auth0 | in_progress | feature/auth0 | | Session 1 started |
-| 2 — Postgres + RLS | not_started | feature/postgres-rls | | |
+| 1 — Auth0 | complete | feature/auth0 | 92952ae | All tasks done, tests written |
+| 2 — Postgres + RLS | ready_to_start | feature/postgres-rls | | |
 | 3 — Scoped RBAC | not_started | feature/rbac-v2 | | |
 | 4 — Qdrant + Storage | not_started | feature/qdrant-storage | | |
 | 5 — Redis + Scale | not_started | feature/redis-scale | | |
@@ -42,3 +42,4 @@ Current phase: phase_1
 - [phase_1 / 1.5] Create JWT verification module in app/auth/auth0_verify.py — done
 - [phase_1 / 1.6] centralize feature flag AUTH_PROVIDER and configure FastAPI dependency in app/api/deps.py — done
 - [phase_1 / 1.7] Add mock-token tests for legacy & auth0 verify logic in tests/test_auth_legacy.py and tests/test_auth_auth0.py — done
+- [phase_1 / 1.8] Committed feature/auth0 branch (92952ae), MIGRATION_STATE.md updated — done

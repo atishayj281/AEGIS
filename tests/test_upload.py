@@ -9,29 +9,56 @@ import pytest
 from fastapi import status
 from fastapi.testclient import TestClient
 
-from app.api.deps import get_auth_service, get_vector_store
+from app.api.deps import get_vector_store
 from app.auth.jwt_auth import User
 from app.models.domain import DataSource, UserRole
 from main import app
 
 client = TestClient(app)
 
+# --- Token/Auth mock shared fixture -------------------------------------------
+_UPLOAD_TOKEN_PAYLOADS = {
+    "admin_token": {
+        "user_id": "admin_user",
+        "org_id": "org_test",
+        "team_ids": ["team_it"],
+        "roles": {"team_it": "org_admin"},
+    },
+    "employee_token": {
+        "user_id": "employee_user",
+        "org_id": "org_test",
+        "team_ids": ["team_hr"],
+        "roles": {"team_hr": "employee"},
+    },
+}
+
+
+@pytest.fixture(autouse=True)
+def mock_jwks_upload():
+    """Patch JWKS verification so upload tests don't hit the network."""
+    def decode_side_effect(token, key, algorithms, audience, issuer):
+        if token in _UPLOAD_TOKEN_PAYLOADS:
+            return _UPLOAD_TOKEN_PAYLOADS[token]
+        import jwt as jwt_lib
+        raise jwt_lib.InvalidSignatureError("Signature verification failed")
+
+    mock_key = MagicMock()
+    mock_key.key = "fake-public-key"
+    mock_client = MagicMock()
+    mock_client.get_signing_key_from_jwt.return_value = mock_key
+
+    with (
+        patch("app.auth.auth0_verify.jwt.PyJWKClient", return_value=mock_client),
+        patch("app.auth.auth0_verify.jwt.decode", side_effect=decode_side_effect),
+    ):
+        yield
+
 
 @pytest.fixture
 def auth_headers():
-    auth = get_auth_service()
-    
-    # Admin User Headers
-    admin = User("admin_user", UserRole.ADMIN, "IT")
-    admin_token, _ = auth.create_token(admin)
-    
-    # Employee User Headers
-    employee = User("employee_user", UserRole.EMPLOYEE, "HR")
-    employee_token, _ = auth.create_token(employee)
-    
     return {
-        "admin": {"Authorization": f"Bearer {admin_token}"},
-        "employee": {"Authorization": f"Bearer {employee_token}"},
+        "admin": {"Authorization": "Bearer admin_token"},
+        "employee": {"Authorization": "Bearer employee_token"},
     }
 
 
