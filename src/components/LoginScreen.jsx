@@ -3,10 +3,6 @@ import { Shield, Lock, AlertTriangle, Loader2, ChevronRight, Sparkles } from "lu
 import { C, ROLES } from "./SmallComponents";
 
 export default function LoginScreen({ onLogin, onDemo, error, loading }) {
-  const [apiBase, setApiBase] = useState("http://localhost:8000");
-  const [username, setUsername] = useState("");
-  const [password, setPassword] = useState("");
-  const [showAdvanced, setShowAdvanced] = useState(false);
   const [tab, setTab] = useState("live"); // 'live' | 'demo'
   const [demoHover, setDemoHover] = useState(null);
 
@@ -20,8 +16,7 @@ export default function LoginScreen({ onLogin, onDemo, error, loading }) {
 
   const handleLoginSubmit = (e) => {
     e.preventDefault();
-    if (!username.trim() || !password.trim()) return;
-    onLogin(apiBase.trim(), username.trim(), password.trim());
+    onLogin();
   };
 
   return (
@@ -112,72 +107,10 @@ export default function LoginScreen({ onLogin, onDemo, error, loading }) {
               boxShadow: "var(--shadow-md)",
             }}
           >
-            <div style={{ marginBottom: "16px" }}>
-              <label style={{ fontSize: "12px", color: C.muted, fontWeight: 500, display: "block", marginBottom: "6px" }}>
-                Username
-              </label>
-              <input
-                className="aegis-input"
-                type="text"
-                value={username}
-                onChange={(e) => setUsername(e.target.value)}
-                placeholder="e.g. compliance_officer"
-                required
-              />
-            </div>
-
-            <div style={{ marginBottom: "16px" }}>
-              <label style={{ fontSize: "12px", color: C.muted, fontWeight: 500, display: "block", marginBottom: "6px" }}>
-                Password
-              </label>
-              <input
-                className="aegis-input"
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder="••••••••"
-                required
-              />
-            </div>
-
-            <div style={{ marginBottom: "20px" }}>
-              <button
-                type="button"
-                onClick={() => setShowAdvanced((s) => !s)}
-                style={{
-                  background: "none",
-                  border: "none",
-                  color: C.muted,
-                  fontSize: "12px",
-                  fontWeight: 500,
-                  cursor: "pointer",
-                  padding: 0,
-                  display: "flex",
-                  alignItems: "center",
-                  gap: "4px",
-                }}
-              >
-                {showAdvanced ? "Hide" : "Show"} API Settings
-              </button>
-
-              {showAdvanced && (
-                <div style={{ marginTop: "12px", borderTop: `1px solid ${C.borderSoft}`, paddingTop: "12px" }}>
-                  <label style={{ fontSize: "11px", color: C.muted, display: "block", marginBottom: "4px" }}>
-                    FastAPI Base URL
-                  </label>
-                  <input
-                    className="aegis-input aegis-mono"
-                    type="url"
-                    value={apiBase}
-                    onChange={(e) => setApiBase(e.target.value)}
-                    placeholder="http://localhost:8000"
-                  />
-                  <span style={{ fontSize: "10.5px", color: C.dark, marginTop: "4px", display: "block" }}>
-                    Requests hit <span className="aegis-mono">/api/v1/auth/token</span>. Requires CORS access.
-                  </span>
-                </div>
-              )}
-            </div>
+            <p style={{ color: C.muted, fontSize: "13px", marginBottom: "20px", lineHeight: 1.5 }}>
+              Sign in securely via Auth0 Universal Login. You'll be redirected
+              to authenticate and brought back here automatically.
+            </p>
 
             {error && (
               <div
@@ -201,7 +134,7 @@ export default function LoginScreen({ onLogin, onDemo, error, loading }) {
 
             <button
               type="submit"
-              disabled={loading || !username.trim() || !password.trim()}
+              disabled={loading}
               className="aegis-btn aegis-btn-primary"
               style={{ width: "100%", padding: "12px", fontSize: "14px" }}
             >
@@ -210,7 +143,7 @@ export default function LoginScreen({ onLogin, onDemo, error, loading }) {
               ) : (
                 <Lock size={15} />
               )}
-              {loading ? "Verifying Credentials…" : "Authenticate Session"}
+              {loading ? "Redirecting…" : "Sign in with Auth0"}
             </button>
 
             <div
@@ -222,10 +155,7 @@ export default function LoginScreen({ onLogin, onDemo, error, loading }) {
                 lineHeight: "1.4",
               }}
             >
-              Default accounts: <span className="aegis-mono">admin_user</span> (admin123),{" "}
-              <span className="aegis-mono">compliance_officer</span> (compliance123),{" "}
-              <span className="aegis-mono">finance_analyst</span> (finance123),{" "}
-              <span className="aegis-mono">ops_engineer</span> (ops123)
+              Authentication and roles are managed in your Auth0 tenant.
             </div>
           </form>
         ) : (

@@ -1,7 +1,8 @@
-import React, { useState, useCallback, useRef } from "react";
+import React, { useState, useCallback, useRef, useEffect } from "react";
 import {
   Shield, ClipboardList, Search, LogOut, Database,
 } from "lucide-react";
+import { useAuth0 } from "@auth0/auth0-react";
 
 /* ── Modular components ── */
 import LoginScreen from "./components/LoginScreen";
@@ -194,6 +195,17 @@ const NAV_ITEMS = [
    ══════════════════════════════════════════════ */
 
 export default function App() {
+  /* ─── Auth0 ─── */
+  const {
+    isLoading: auth0Loading,
+    isAuthenticated,
+    user,
+    loginWithRedirect,
+    logout: auth0Logout,
+    getAccessTokenSilently,
+    error: auth0Error,
+  } = useAuth0();
+
   /* ─── Auth / session state ─── */
   const [session, setSession] = useState(null); // { token, roleKey, username, apiBase, live }
   const [loginError, setLoginError] = useState(null);
@@ -240,28 +252,54 @@ export default function App() {
      Authentication handlers
   ────────────────────────────────────────────── */
 
-  async function handleLogin(apiBase, username, password) {
+  async function handleLogin() {
+    // Manual username/password POST is replaced by Auth0 Universal Login.
+    // Kick off the redirect; session gets built in the effect below once
+    // Auth0 returns isAuthenticated=true.
     setLoginBusy(true);
     setLoginError(null);
     setConnStatus("checking");
     try {
-      const data = await api.login(apiBase, username, password);
-      const token = data.access_token || data.token;
-      if (!token) throw new Error("Server returned no token.");
-      const claims = decodeJwt(token);
-      const roleKey = normalizeRole(claims.role || claims.sub || claims.scope, username);
-      const sess = { token, roleKey, username, apiBase, live: true };
-      setSession(sess);
-      setConnStatus("connected");
-      fetchDocuments(apiBase, token);
-      fetchAuditLogs(apiBase, token);
+      await loginWithRedirect();
     } catch (err) {
       setLoginError(err.message);
       setConnStatus("error");
-    } finally {
       setLoginBusy(false);
     }
   }
+
+  // Build `session` from Auth0 state once authentication completes.
+  useEffect(() => {
+    if (auth0Error) {
+      setLoginError(auth0Error.message);
+      setConnStatus("error");
+      setLoginBusy(false);
+      return;
+    }
+    if (isAuthenticated && !session) {
+      (async () => {
+        try {
+          const token = await getAccessTokenSilently({
+            authorizationParams: { audience: "https://aegis-api" },
+          });
+          const claims = decodeJwt(token);
+          const rolesDict = claims["https://aegis-api/roles"] || {};
+          const roleClaim = Object.values(rolesDict)[0] || claims.role;
+          const roleKey = normalizeRole(roleClaim, user?.email);
+          const sess = { token, roleKey, username: user?.email, apiBase: DEFAULT_API_BASE, live: true };
+          setSession(sess);
+          setConnStatus("connected");
+          fetchDocuments(DEFAULT_API_BASE, token);
+          fetchAuditLogs(DEFAULT_API_BASE, token);
+        } catch (err) {
+          setLoginError(err.message);
+          setConnStatus("error");
+        } finally {
+          setLoginBusy(false);
+        }
+      })();
+    }
+  }, [isAuthenticated, auth0Error, session, user, getAccessTokenSilently, fetchDocuments, fetchAuditLogs]);
 
   function handleDemo(roleKey) {
     setSession({ token: null, roleKey, username: Object.keys(DEMO_USERS).find(k => DEMO_USERS[k] === roleKey) || roleKey, apiBase: DEFAULT_API_BASE, live: false });
@@ -277,6 +315,9 @@ export default function App() {
     setActiveTab("query");
     setConnStatus("demo");
     setLoginError(null);
+    if (isAuthenticated) {
+      auth0Logout({ logoutParams: { returnTo: window.location.origin } });
+    }
   }
 
   function handleSessionExpired() {
