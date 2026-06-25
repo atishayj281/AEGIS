@@ -12,6 +12,7 @@ from qdrant_client.http.models import (
     FieldCondition,
     Filter,
     MatchAny,
+    PayloadSchemaType,
     PointStruct,
     VectorParams,
 )
@@ -42,6 +43,13 @@ DOCUMENT_SOURCE_MAP = {
 
 class VectorStore:
     COLLECTION_NAME = "enterprise_documents"
+
+    # Payload fields that get filtered on in `search()` must have an explicit
+    # index in Qdrant — unlike the vector itself, payload fields are never
+    # auto-indexed. Add any new filterable field here.
+    FILTERABLE_PAYLOAD_FIELDS = {
+        "data_source": PayloadSchemaType.KEYWORD,
+    }
 
     def __init__(self, settings: Settings | None = None):
         self.settings = settings or get_settings()
@@ -75,7 +83,11 @@ class VectorStore:
         )
 
         # Collection is created lazily on first ingest, once we know the
-        # embedding dimension.
+        # embedding dimension. If it already exists from a previous run,
+        # make sure required payload indexes are present too — covers the
+        # case where the collection was created before this fix existed.
+        if self._client.collection_exists(self.COLLECTION_NAME):
+            self._ensure_payload_indexes()
 
     @property
     def document_count(self) -> int:
@@ -145,6 +157,27 @@ class VectorStore:
             collection_name=self.COLLECTION_NAME,
             vectors_config=VectorParams(size=dim, distance=Distance.COSINE),
         )
+        self._ensure_payload_indexes()
+
+    def _ensure_payload_indexes(self) -> None:
+        """Create payload indexes for every field `search()` filters on.
+
+        Qdrant requires an explicit index on any payload field used inside a
+        Filter/FieldCondition — it is not created automatically alongside the
+        vector index. Skipping this causes search() to fail with:
+            Bad request: Index required but not found for "data_source" ...
+        This is idempotent: re-creating an existing index is a safe no-op
+        (Qdrant returns success rather than erroring).
+        """
+        existing = self._client.get_collection(self.COLLECTION_NAME).payload_schema or {}
+        for field_name, schema_type in self.FILTERABLE_PAYLOAD_FIELDS.items():
+            if field_name in existing:
+                continue
+            self._client.create_payload_index(
+                collection_name=self.COLLECTION_NAME,
+                field_name=field_name,
+                field_schema=schema_type,
+            )
 
     def _get_embeddings(self, texts: list[str], is_query: bool = False) -> list[list[float]]:
         """Embed a batch of texts (documents) or a single query string."""
@@ -217,6 +250,8 @@ class VectorStore:
                     chunk_id=str(match.id),
                 )
             )
+
+        print(f"\n\n{"-"*20}\n{vector_results}\n{"-"*20}")
 
         return sorted(vector_results, key=lambda r: r.score, reverse=True)
 

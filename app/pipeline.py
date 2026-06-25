@@ -20,6 +20,7 @@ from app.retrieval.aggregator import ContextAggregator
 from app.routing.router import QueryRouter
 from app.security.data_masking import DataMasker
 from app.security.prompt_injection import PromptInjectionGuard
+from app.conversation.manager import ConversationManager, get_conversation_manager
 
 
 class RAGPipeline:
@@ -33,6 +34,7 @@ class RAGPipeline:
         injection_guard: PromptInjectionGuard | None = None,
         data_masker: DataMasker | None = None,
         audit_logger: AuditLogger | None = None,
+        conversation_manager: ConversationManager | None = None,
     ):
         self.intent_classifier = intent_classifier or IntentClassifier()
         self.query_router = query_router or QueryRouter()
@@ -42,16 +44,23 @@ class RAGPipeline:
         self.injection_guard = injection_guard or PromptInjectionGuard()
         self.data_masker = data_masker or DataMasker()
         self.audit_logger = audit_logger or AuditLogger()
+        self.conversation_manager = conversation_manager or get_conversation_manager()
 
     async def process_query(
         self,
         query: str,
         user: User,
         top_k: int = 5,
+        session_id: str | None = None,
     ) -> QueryResponse | AccessDeniedResponse | SecurityViolationResponse:
         start = time.perf_counter()
         query_id = str(uuid.uuid4())[:8]
         now = datetime.now(timezone.utc)
+
+        # Retrieve conversation context
+        session = self.conversation_manager.get_or_create_session(session_id, user.username)
+        history = self.conversation_manager.get_history(session.session_id)
+        conversation_turn = (len(session.turns) // 2) + 1
 
         # Step 1: Prompt injection check
         safe, reason = self.injection_guard.check(query)
@@ -80,8 +89,11 @@ class RAGPipeline:
         # Step 2: Intent classification
         intent_result = self.intent_classifier.classify(query)
 
+        print(f"Intent: {intent_result}")
+
         # Step 3: RBAC - check inferred sensitive sources
         inferred_sources = self.rbac.infer_required_sources(query)
+        print(f"Inferred Source: {inferred_sources}")
         if inferred_sources:
             allowed, denied_source = self.rbac.check_query_access(user.role, inferred_sources)
             if not allowed and denied_source:
@@ -112,6 +124,7 @@ class RAGPipeline:
 
         # Step 4: Route to data sources
         routed_sources = self.query_router.route(intent_result, user.role, query)
+        print(f"Route: {routed_sources}")
         if not routed_sources:
             self.audit_logger.log(
                 AuditLogEntry(
@@ -135,10 +148,12 @@ class RAGPipeline:
 
         # Step 5: Hybrid retrieval
         context = self.aggregator.retrieve(query, routed_sources, top_k=top_k)
-
-        # Step 6: Generate grounded response
-        answer, confidence = await self.response_generator.generate(query, context, intent_result)
-
+        print(f"Context: {context}")
+        # Step 6: Grounded response
+        answer, confidence = await self.response_generator.generate(
+            query, context, intent_result, history=history
+        )
+        
         # Step 7: Mask sensitive data
         masked = self.data_masker.mask(answer)
         for chunk_idx, chunk in enumerate(context.chunks):
@@ -148,6 +163,10 @@ class RAGPipeline:
         for citation in context.citations:
             citation_masked = self.data_masker.mask(citation.excerpt)
             citation.excerpt = citation_masked.text
+
+        # Record this turn in the session history (safe, masked version)
+        self.conversation_manager.add_turn(session.session_id, "user", query)
+        self.conversation_manager.add_turn(session.session_id, "assistant", masked.text)
 
         elapsed_ms = round((time.perf_counter() - start) * 1000, 2)
 
@@ -181,4 +200,6 @@ class RAGPipeline:
             query_id=query_id,
             response_time_ms=elapsed_ms,
             timestamp=now,
+            session_id=session.session_id,
+            conversation_turn=conversation_turn,
         )

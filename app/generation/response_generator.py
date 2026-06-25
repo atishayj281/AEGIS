@@ -1,11 +1,15 @@
 """Grounded response generation with optional LLM backend."""
 
 import re
+from typing import TYPE_CHECKING
 
 from app.config import Settings, get_settings
 from app.intent.classifier import IntentResult
 from app.models.domain import QueryIntent
 from app.retrieval.aggregator import RetrievedContext
+
+if TYPE_CHECKING:
+    from app.conversation.manager import ConversationTurn
 
 
 class ResponseGenerator:
@@ -23,6 +27,7 @@ class ResponseGenerator:
         query: str,
         context: RetrievedContext,
         intent_result: IntentResult,
+        history: list["ConversationTurn"] | None = None,
     ) -> tuple[str, float]:
         if not context.chunks:
             return (
@@ -33,35 +38,48 @@ class ResponseGenerator:
 
         if self.settings.openai_api_key:
             try:
-                answer, confidence = await self._generate_with_llm(query, context, intent_result)
+                answer, confidence = await self._generate_with_llm(
+                    query, context, intent_result, history
+                )
                 return answer, confidence
             except Exception:
                 pass
 
-        return self._generate_template(query, context, intent_result)
+        return self._generate_template(query, context, intent_result, history)
 
     async def _generate_with_llm(
         self,
         query: str,
         context: RetrievedContext,
         intent_result: IntentResult,
+        history: list["ConversationTurn"] | None = None,
     ) -> tuple[str, float]:
         from openai import AsyncOpenAI
 
         client = AsyncOpenAI(api_key=self.settings.openai_api_key)
+
+        # Build the message list: system + optional prior turns + current query
+        messages: list[dict] = [
+            {"role": "system", "content": self.SYSTEM_PROMPT},
+        ]
+
+        # Inject conversation history as alternating user/assistant messages
+        if history:
+            for turn in history:
+                messages.append({"role": turn.role, "content": turn.content})
+
+        # Append the current query with retrieved context
         user_prompt = (
             f"Query: {query}\n\n"
             f"Intent: {intent_result.intent.value}\n\n"
             f"Context:\n{context.combined_context}\n\n"
             "Provide a concise, grounded answer with bullet points where appropriate."
         )
+        messages.append({"role": "user", "content": user_prompt})
 
         response = await client.chat.completions.create(
             model=self.settings.openai_model,
-            messages=[
-                {"role": "system", "content": self.SYSTEM_PROMPT},
-                {"role": "user", "content": user_prompt},
-            ],
+            messages=messages,
             temperature=0.1,
             max_tokens=800,
         )
@@ -74,9 +92,19 @@ class ResponseGenerator:
         query: str,
         context: RetrievedContext,
         intent_result: IntentResult,
+        history: list["ConversationTurn"] | None = None,
     ) -> tuple[str, float]:
         intent = intent_result.intent
         parts: list[str] = []
+
+        # Prepend a brief history summary so the template answer has some
+        # conversational continuity even without an LLM.
+        if history:
+            history_lines = []
+            for turn in history[-3:]:  # last 3 turns to keep it concise
+                prefix = "Q" if turn.role == "user" else "A"
+                history_lines.append(f"  [{prefix}]: {turn.content[:200]}")
+            parts.append("[Prior conversation]\n" + "\n".join(history_lines) + "\n")
 
         if intent == QueryIntent.COMPLIANCE_LOOKUP:
             parts.extend(self._extract_compliance(context))

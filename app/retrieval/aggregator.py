@@ -75,46 +75,47 @@ class ContextAggregator:
                 )
             )
 
-        # Structured retrievers
-        retriever_configs = [
-            (self.sql_retriever, "sql_query", DataSource.FINANCIAL_DATABASE),
-            (self.csv_retriever, "csv_filter", DataSource.OPERATIONAL_DATASETS),
-            (self.json_retriever, "json_filter", DataSource.AUDIT_LOGS),
-        ]
+        # # Structured retrievers
+        # Not required now
+        # retriever_configs = [
+        #     (self.sql_retriever, "sql_query", DataSource.FINANCIAL_DATABASE),
+        #     (self.csv_retriever, "csv_filter", DataSource.OPERATIONAL_DATASETS),
+        #     (self.json_retriever, "json_filter", DataSource.AUDIT_LOGS),
+        # ]
 
-        for retriever, method, default_source in retriever_configs:
-            start = time.perf_counter()
-            try:
-                results = retriever.retrieve(query, allowed_sources)
-                latency = (time.perf_counter() - start) * 1000
-                context.traces.append(
-                    RetrievalTrace(
-                        data_source=default_source,
-                        method=method,
-                        result_count=len(results),
-                        latency_ms=round(latency, 2),
-                        status="success" if results else "no_results",
-                    )
-                )
-                for result in results:
-                    citation = Citation(
-                        source_type=method.split("_")[0],
-                        source_name=result.source_name,
-                        excerpt=result.content[:300],
-                        relevance_score=round(result.score, 3),
-                        data_source=result.data_source,
-                    )
-                    all_chunks.append((result.content, citation))
-            except Exception as exc:
-                context.traces.append(
-                    RetrievalTrace(
-                        data_source=default_source,
-                        method=method,
-                        result_count=0,
-                        latency_ms=round((time.perf_counter() - start) * 1000, 2),
-                        status=f"error: {exc}",
-                    )
-                )
+        # for retriever, method, default_source in retriever_configs:
+        #     start = time.perf_counter()
+        #     try:
+        #         results = retriever.retrieve(query, allowed_sources)
+        #         latency = (time.perf_counter() - start) * 1000
+        #         context.traces.append(
+        #             RetrievalTrace(
+        #                 data_source=default_source,
+        #                 method=method,
+        #                 result_count=len(results),
+        #                 latency_ms=round(latency, 2),
+        #                 status="success" if results else "no_results",
+        #             )
+        #         )
+        #         for result in results:
+        #             citation = Citation(
+        #                 source_type=method.split("_")[0],
+        #                 source_name=result.source_name,
+        #                 excerpt=result.content[:300],
+        #                 relevance_score=round(result.score, 3),
+        #                 data_source=result.data_source,
+        #             )
+        #             all_chunks.append((result.content, citation))
+        #     except Exception as exc:
+        #         context.traces.append(
+        #             RetrievalTrace(
+        #                 data_source=default_source,
+        #                 method=method,
+        #                 result_count=0,
+        #                 latency_ms=round((time.perf_counter() - start) * 1000, 2),
+        #                 status=f"error: {exc}",
+        #             )
+        #         )
 
         # Keyword boost: re-rank by query term overlap
         query_terms = set(query.lower().split())
@@ -127,11 +128,11 @@ class ContextAggregator:
         )
 
         seen_sources: set[str] = set()
-        for chunk, citation in all_chunks[: top_k * 2]:
+        for chunk, citation in all_chunks[: top_k]:
             source_key = f"{citation.source_name}:{citation.excerpt[:50]}"
-            if source_key in seen_sources:
-                continue
-            seen_sources.add(source_key)
+            # if source_key in seen_sources:
+            #     continue
+            # seen_sources.add(source_key)
             context.chunks.append(chunk)
             context.citations.append(citation)
 

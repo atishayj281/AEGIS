@@ -15,14 +15,15 @@ class Settings(BaseSettings):
     sqlite_path: Path = Path("./data/enterprise.db")
     audit_log_path: Path = Path("./data/audit.log")
 
-    qdrant_url: str = "https://e3373a68-cdad-4410-88c3-488c5f5d87a5.us-west-1-0.aws.cloud.qdrant.io:6333" 
+    qdrant_url: str = "https://e3373a68-cdad-4410-88c3-488c5f5d87a5.us-west-1-0.aws.cloud.qdrant.io:6333"
     qdrant_api_key: str = os.getenv("QDRANT_API_KEY")
 
     nvidia_api_key: str = os.getenv("NVIDIA_API_KEY")
 
-    jwt_secret_key: str = "dev-secret-change-in-production"
-    jwt_algorithm: str = "HS256"
-    jwt_expire_minutes: int = 60
+    # Auth0 — used to verify RS256 JWTs issued by the frontend Auth0 tenant.
+    # The frontend handles login; the backend only validates the access_token.
+    auth0_domain: str = os.getenv("AUTH0_DOMAIN", "your-tenant.auth0.com")
+    auth0_audience: str = os.getenv("AUTH0_AUDIENCE", "https://your-api-audience")
 
     openai_api_key: str | None = None
     openai_model: str = "gpt-4o-mini"
@@ -30,6 +31,10 @@ class Settings(BaseSettings):
     max_retrieval_results: int = 8
     retrieval_timeout_seconds: float = 2.0
     query_timeout_seconds: float = 5.0
+
+    # Conversation history settings
+    conversation_max_turns: int = 20
+    conversation_session_ttl_minutes: int = 60
 
 
 @lru_cache

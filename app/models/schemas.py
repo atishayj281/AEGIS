@@ -18,9 +18,25 @@ class TokenResponse(BaseModel):
     expires_in: int
 
 
+class ConversationTurnSchema(BaseModel):
+    """Public representation of a single conversation turn."""
+
+    role: str  # "user" | "assistant"
+    content: str
+    timestamp: datetime
+
+
 class QueryRequest(BaseModel):
     query: str = Field(..., min_length=3, max_length=2000)
     top_k: int = Field(default=5, ge=1, le=20)
+    session_id: str | None = Field(
+        default=None,
+        description=(
+            "Optional conversation session ID.  If omitted, a new session is "
+            "created and its ID is returned in the response.  Pass the returned "
+            "session_id in subsequent requests to maintain conversation context."
+        ),
+    )
 
 
 class Citation(BaseModel):
@@ -52,6 +68,13 @@ class QueryResponse(BaseModel):
     query_id: str
     response_time_ms: float
     timestamp: datetime
+    # Conversation / session fields
+    session_id: str = Field(
+        description="Session ID to pass in subsequent requests for multi-turn conversation."
+    )
+    conversation_turn: int = Field(
+        description="1-based index of this exchange within the session."
+    )
 
 
 class AccessDeniedResponse(BaseModel):
@@ -91,6 +114,17 @@ class AuditLogEntry(BaseModel):
     response_time_ms: float | None = None
     timestamp: datetime
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class SessionInfoResponse(BaseModel):
+    """Summary information about an active conversation session."""
+
+    session_id: str
+    username: str
+    turn_count: int
+    created_at: datetime
+    last_active: datetime
+    turns: list[ConversationTurnSchema] = Field(default_factory=list)
 
 
 class UploadResponse(BaseModel):

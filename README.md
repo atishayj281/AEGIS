@@ -9,8 +9,9 @@ A secure, context-aware Retrieval-Augmented Generation (RAG) platform for queryi
 - **Secure Document Upload** — API-driven file upload routes protected by strict JWT and role-based validation
 - **Intent Classification** — Routes queries by compliance, audit, finance, operations, and policy domains
 - **Hybrid Retrieval** — Vector semantic search + SQL + CSV filtering + JSON log queries
+- **Conversation History (Multi-Turn)** — Thread-safe, session-based context retention with sliding-window history limits and lazy TTL eviction
 - **RBAC Enforcement** — Five roles with granular data source permissions
-- **Security Layer** — Prompt injection detection, sensitive data masking, JWT auth
+- **Security Layer** — Prompt injection detection, sensitive data masking (masked versions safely saved in history), JWT auth
 - **Grounded Responses** — Source-backed answers with citations, confidence scores, and retrieval traces
 - **Observability** — Audit logging, RBAC violation tracking, performance metrics
 
@@ -139,13 +140,24 @@ curl -X POST http://localhost:8000/api/v1/auth/token \
   -d '{"username": "compliance_officer", "password": "compliance123"}'
 ```
 
-### 2. Query
+### 2. Query (Single or Multi-Turn)
+
+To initiate a conversation or query the RAG pipeline, run:
 
 ```bash
 curl -X POST http://localhost:8000/api/v1/query \
   -H "Authorization: Bearer <TOKEN>" \
   -H "Content-Type: application/json" \
   -d '{"query": "What are the compliance requirements for customer data retention?"}'
+```
+
+To continue the same conversation (multi-turn), pass the `session_id` returned from the prior query response:
+
+```bash
+curl -X POST http://localhost:8000/api/v1/query \
+  -H "Authorization: Bearer <TOKEN>" \
+  -H "Content-Type: application/json" \
+  -d '{"query": "Who is the primary contact for this policy?", "session_id": "session-uuid-here"}'
 ```
 
 ### 3. Ingest/Upload Document
@@ -156,7 +168,7 @@ curl -X POST http://localhost:8000/api/v1/document/upload \
   -F "file=@/path/to/policy.pdf" \
   -F "data_source=compliance_records"
 ```
-*Note: Supported formats include PDF, DOCX, TXT, CSV, XLSX/XLS, JSON, PNG, JPG, and JPEG. Files are saved locally and immediately parsed, chunked, and embedded into Milvus.*
+*Note: Supported formats include PDF, DOCX, TXT, CSV, XLSX/XLS, JSON, PNG, JPG, and JPEG. Files are saved locally and immediately parsed, chunked, and embedded.*
 
 ### 4. List Demo Users
 
@@ -168,7 +180,7 @@ curl -X GET http://localhost:8000/api/v1/auth/demo-users
 
 ### 5. Health Check
 
-Returns health status of the application, version number, count of currently indexed document chunks in Milvus, and active data sources.
+Returns health status of the application, version number, count of currently indexed document chunks, and active data sources.
 
 ```bash
 curl -X GET http://localhost:8000/api/v1/health
@@ -189,6 +201,33 @@ Retrieves the 20 most recent logged events in the audit trail (requires authenti
 
 ```bash
 curl -X GET http://localhost:8000/api/v1/audit/recent \
+  -H "Authorization: Bearer <TOKEN>"
+```
+
+### 8. List Active Sessions
+
+Retrieve all active, unexpired conversation sessions owned by the currently authenticated user.
+
+```bash
+curl -X GET http://localhost:8000/api/v1/conversation/sessions \
+  -H "Authorization: Bearer <TOKEN>"
+```
+
+### 9. Retrieve Session History
+
+Retrieve metadata and the full history of turns for a specific session ID (strictly ownership-validated; returns 403 if accessed by another user).
+
+```bash
+curl -X GET http://localhost:8000/api/v1/conversation/sessions/session-uuid-here \
+  -H "Authorization: Bearer <TOKEN>"
+```
+
+### 10. Close / Clear Session
+
+Manually evict and delete an active conversation session.
+
+```bash
+curl -X DELETE http://localhost:8000/api/v1/conversation/sessions/session-uuid-here \
   -H "Authorization: Bearer <TOKEN>"
 ```
 
@@ -226,13 +265,17 @@ data/
 └── enterprise.db       # SQLite (invoices, salaries, budgets) — auto-created
 ```
 
-## Optional: LLM Integration
+## Optional: LLM Integration & Configuration
 
 Set `OPENAI_API_KEY` in `.env` for GPT-powered response generation. Without it, the platform uses template-based grounded responses from retrieved context.
 
 ```env
 OPENAI_API_KEY=sk-your-key
 OPENAI_MODEL=gpt-4o-mini
+
+# Conversation History / Multi-Turn configurations (optional, defaults are shown below)
+CONVERSATION_MAX_TURNS=20
+CONVERSATION_SESSION_TTL_MINUTES=60
 ```
 
 ## Design Decisions
@@ -254,6 +297,7 @@ enterprise-rag-platform/
 │   ├── intent/         # Intent classification
 │   ├── routing/        # Data source routing
 │   ├── retrieval/      # Vector, SQL, CSV, JSON retrievers
+│   ├── conversation/   # Thread-safe session management & history store
 │   ├── document/       # Document upload and multi-format parsers
 │   ├── generation/     # Grounded response generation
 │   ├── observability/  # Audit logging
@@ -261,7 +305,7 @@ enterprise-rag-platform/
 │   └── pipeline.py     # Main orchestrator
 ├── data/               # Sample enterprise datasets
 ├── scripts/            # Ingestion & demo scripts
-├── tests/              # RBAC & security tests
+├── tests/              # RBAC, security, and conversation tests
 ├── main.py             # Application entry point
 └── requirements.txt
 ```
