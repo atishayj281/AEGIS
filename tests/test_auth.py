@@ -31,9 +31,9 @@ def _make_auth0_payload(
     """Build a decoded JWT payload matching the Auth0 custom claim schema."""
     return {
         "sub": sub,
-        "https://yourapp.com/org_id": org_id,
-        "https://yourapp.com/team_ids": team_ids or [],
-        "https://yourapp.com/roles": roles or {},
+        "https://aegis-api/org_id": org_id,
+        "https://aegis-api/team_ids": team_ids or [],
+        "https://aegis-api/roles": roles or {},
     }
 
 

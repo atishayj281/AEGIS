@@ -11,13 +11,17 @@ import jwt
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
-from app.auth.auth0_verify import verify_token
+from app.auth.auth0_verify import verify_token, get_current_context
 from app.auth.jwt_auth import User
 from app.config import get_settings
 from app.models.domain import UserRole
 from app.pipeline import RAGPipeline
 from app.retrieval.vector_store import VectorStore
 from app.conversation.manager import ConversationManager, get_conversation_manager
+from sqlalchemy.ext.asyncio import AsyncSession
+from app.db.session import InvalidOrgIdError, tenant_scoped_session
+
+from typing import AsyncIterator
 
 security = HTTPBearer()
 
@@ -25,6 +29,40 @@ _pipeline: RAGPipeline | None = None
 _vector_store: VectorStore | None = None
 _conversation_manager: ConversationManager | None = None
 
+
+async def get_db(
+    context: dict = Depends(get_current_context),
+) -> AsyncIterator[AsyncSession]:
+    """FastAPI dependency yielding an org-scoped AsyncSession.
+
+    Keyed off get_current_context (the Auth0-verified org_id from Phase 1),
+    not off get_current_user — get_current_context is the lower-level dict
+    dependency that both get_current_user and this dependency independently
+    build on, so a route can depend on get_db without also paying for a
+    second, separate JWT verification pass for get_current_user.
+
+    Every query run through the yielded session is scoped by the
+    tenant_isolation RLS policies (migration 0002) to context["org_id"]
+    for the lifetime of this one request's transaction — see
+    app/db/session.py for why that's set via set_config(..., true)
+    (transaction-scoped) rather than a session-wide SET.
+
+    A missing or malformed org_id claim raises InvalidOrgIdError inside
+    tenant_scoped_session before any query runs; that's translated to a
+    400 here rather than propagating as an unhandled 500, since by this
+    point the token itself already passed signature/audience/issuer
+    verification — an invalid org_id at this stage is a malformed claim,
+    not a forged or invalid token.
+    """
+    org_id = context.get("org_id")
+    try:
+        async with tenant_scoped_session(org_id) as session:
+            yield session
+    except InvalidOrgIdError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid org_id claim: {e}",
+        ) from e
 
 def get_vector_store() -> VectorStore:
     global _vector_store

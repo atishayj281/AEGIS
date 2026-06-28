@@ -43,3 +43,9 @@ Current phase: phase_1 — complete, phase_2 ready_to_start
 - [phase_1 / 1.6] centralize feature flag AUTH_PROVIDER and configure FastAPI dependency in app/api/deps.py — done
 - [phase_1 / 1.7] Add mock-token tests for legacy & auth0 verify logic in tests/test_auth_legacy.py and tests/test_auth_auth0.py — done
 - [phase_1 / 1.8] Committed feature/auth0 branch (92952ae), MIGRATION_STATE.md updated — done
+- [phase_2 / 2.1] Provision Postgres + Alembic — done
+- [phase_2 / 2.2] Create tenancy schema (0001_tenancy_schema.py) — done. 9 tables, org_id denormalized onto child tables for RLS-without-joins, documents.status as Postgres ENUM.
+- [phase_2 / 2.3] Enable RLS (0002_enable_rls.py) — done. FORCE ROW LEVEL SECURITY required since app + Alembic share one DB role; organizations table policy filters on id (no org_id column), not org_id.
+- [phase_2 / 2.4] Migrate SQLite data into Postgres — skipped. app/db/models.py confirmed no schema/data ever existed; ConversationManager confirmed ephemeral in-memory by design. Nothing to migrate.
+- [phase_2 / 2.5] Tenant-scoped DB session (app/db/session.py) — done. Uses set_config(..., true), not literal SET LOCAL with a bind param (SET expects a literal, not a bound parameter). org_id validated as UUID before reaching SQL, to keep RLS's fail-closed guarantee intact for malformed claims, not just missing ones.
+- [phase_2 / 2.6] Replace SQLite call sites — done. app/retrieval/sql_retriever.py and its seed data (invoices/salary_records/budget_reports) deprecated as legacy demo code, not migrated — these tables had no org_id and weren't part of the real schema. DataSource enum + RBAC permissions kept (still load-bearing, unrelated to SQLite removal). app/db/models.py deleted. scripts/ingest_data.py cleaned of stale SQLite references; also fixed a pre-existing crash bug (settings.chroma_persist_dir doesn't exist, replaced with settings.qdrant_url).

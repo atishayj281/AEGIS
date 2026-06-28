@@ -7,7 +7,6 @@ from app.models.domain import DataSource
 from app.models.schemas import Citation, RetrievalTrace
 from app.retrieval.csv_retriever import CSVRetriever
 from app.retrieval.json_retriever import JSONRetriever
-from app.retrieval.sql_retriever import SQLRetriever
 from app.retrieval.vector_store import VectorStore
 
 
@@ -23,12 +22,10 @@ class ContextAggregator:
     def __init__(
         self,
         vector_store: VectorStore | None = None,
-        sql_retriever: SQLRetriever | None = None,
         csv_retriever: CSVRetriever | None = None,
         json_retriever: JSONRetriever | None = None,
     ):
         self.vector_store = vector_store or VectorStore()
-        self.sql_retriever = sql_retriever or SQLRetriever()
         self.csv_retriever = csv_retriever or CSVRetriever()
         self.json_retriever = json_retriever or JSONRetriever()
 

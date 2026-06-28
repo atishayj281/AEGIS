@@ -25,6 +25,14 @@ class Settings(BaseSettings):
     auth0_domain: str = os.getenv("AUTH0_DOMAIN", "your-tenant.auth0.com")
     auth0_audience: str = os.getenv("AUTH0_AUDIENCE", "https://your-api-audience")
 
+    # Postgres — multi-tenant relational store (Phase 2). asyncpg driver for the
+    # app's async engine; Alembic swaps this to a sync driver at migration time
+    # (see alembic/env.py) since autogenerate/DDL is more reliable on a sync engine.
+    database_url: str = os.getenv(
+        "DATABASE_URL",
+        "postgresql+asyncpg://aegis:aegis_dev_password@localhost:5432/aegis",
+    )
+
     openai_api_key: str | None = None
     openai_model: str = "gpt-4o-mini"
 

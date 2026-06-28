@@ -16,7 +16,6 @@ from app.config import get_settings
 from app.models.domain import UserRole
 from app.models.schemas import AccessDeniedResponse, QueryResponse, SecurityViolationResponse
 from app.pipeline import RAGPipeline
-from app.retrieval.sql_retriever import SQLRetriever
 from app.retrieval.vector_store import VectorStore
 
 
@@ -76,7 +75,6 @@ async def run_demo():
     if vector_store.document_count == 0:
         count = vector_store.ingest_documents()
         print(f"Ingested {count} document chunks\n")
-    SQLRetriever(settings)
 
     pipeline = RAGPipeline()
 
