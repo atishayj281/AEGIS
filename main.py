@@ -8,14 +8,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from app import __version__
 from app.api.routes import router
 from app.config import get_settings
-from app.retrieval.sql_retriever import SQLRetriever
 from app.retrieval.vector_store import VectorStore
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     settings = get_settings()
-    SQLRetriever(settings)
     print("Enterprise RAG Platform initialized")
     yield
 

@@ -23,7 +23,6 @@ def rbac():
 
 @pytest.fixture
 def pipeline():
-    from app.retrieval.sql_retriever import SQLRetriever
     from app.retrieval.vector_store import VectorStore
     from app.config import get_settings
 
@@ -31,7 +30,6 @@ def pipeline():
     vs = VectorStore(settings)
     if vs.document_count == 0:
         vs.ingest_documents()
-    SQLRetriever(settings)
     return RAGPipeline()
 
 
