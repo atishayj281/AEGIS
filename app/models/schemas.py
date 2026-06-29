@@ -37,6 +37,10 @@ class QueryRequest(BaseModel):
             "session_id in subsequent requests to maintain conversation context."
         ),
     )
+    team_id: str | None = Field(
+        default=None,
+        description="Optional team ID context for scoped RBAC authorization.",
+    )
 
 
 class Citation(BaseModel):
@@ -105,7 +109,7 @@ class HealthResponse(BaseModel):
 class AuditLogEntry(BaseModel):
     query_id: str
     username: str
-    role: UserRole
+    role: str | None = None
     query: str
     intent: QueryIntent | None = None
     outcome: str

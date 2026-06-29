@@ -5,7 +5,8 @@ import uuid
 from datetime import datetime, timezone
 
 from app.auth.jwt_auth import User
-from app.auth.rbac import RBACEngine
+from app.auth.rbac import infer_required_sources, resolve_access
+from sqlalchemy.ext.asyncio import AsyncSession
 from app.generation.response_generator import ResponseGenerator
 from app.intent.classifier import IntentClassifier
 from app.models.domain import DataSource
@@ -28,7 +29,6 @@ class RAGPipeline:
         self,
         intent_classifier: IntentClassifier | None = None,
         query_router: QueryRouter | None = None,
-        rbac: RBACEngine | None = None,
         aggregator: ContextAggregator | None = None,
         response_generator: ResponseGenerator | None = None,
         injection_guard: PromptInjectionGuard | None = None,
@@ -38,7 +38,6 @@ class RAGPipeline:
     ):
         self.intent_classifier = intent_classifier or IntentClassifier()
         self.query_router = query_router or QueryRouter()
-        self.rbac = rbac or RBACEngine()
         self.aggregator = aggregator or ContextAggregator()
         self.response_generator = response_generator or ResponseGenerator()
         self.injection_guard = injection_guard or PromptInjectionGuard()
@@ -50,12 +49,21 @@ class RAGPipeline:
         self,
         query: str,
         user: User,
+        db: AsyncSession,
         top_k: int = 5,
         session_id: str | None = None,
+        team_id: str | None = None,
     ) -> QueryResponse | AccessDeniedResponse | SecurityViolationResponse:
         start = time.perf_counter()
         query_id = str(uuid.uuid4())[:8]
         now = datetime.now(timezone.utc)
+
+        # Resolve the role for the audit log if we can find one for the team_id
+        effective_role = "employee"
+        if team_id and user.roles:
+            effective_role = user.roles.get(team_id, "employee")
+        elif user.roles:
+            effective_role = next(iter(user.roles.values()), "employee")
 
         # Retrieve conversation context
         session = self.conversation_manager.get_or_create_session(session_id, user.username)
@@ -69,7 +77,7 @@ class RAGPipeline:
                 AuditLogEntry(
                     query_id=query_id,
                     username=user.username,
-                    role=user.role,
+                    role=effective_role,
                     query=query,
                     outcome="blocked_security",
                     security_violation=True,
@@ -92,45 +100,55 @@ class RAGPipeline:
         print(f"Intent: {intent_result}")
 
         # Step 3: RBAC - check inferred sensitive sources
-        inferred_sources = self.rbac.infer_required_sources(query)
+        inferred_sources = infer_required_sources(query)
         print(f"Inferred Source: {inferred_sources}")
+        
+        ctx = {
+            "db": db,
+            "user_id": user.db_id,
+            "org_id": user.org_id,
+            "roles": user.roles,
+            "team_ids": user.team_ids,
+        }
+
         if inferred_sources:
-            allowed, denied_source = self.rbac.check_query_access(user.role, inferred_sources)
-            if not allowed and denied_source:
-                self.audit_logger.log(
-                    AuditLogEntry(
-                        query_id=query_id,
-                        username=user.username,
-                        role=user.role,
-                        query=query,
-                        intent=intent_result.intent,
-                        outcome="access_denied",
-                        rbac_violation=True,
-                        response_time_ms=round((time.perf_counter() - start) * 1000, 2),
-                        timestamp=now,
-                        metadata={"denied_source": denied_source.value},
+            for denied_source in inferred_sources:
+                allowed = await resolve_access(ctx, denied_source.value, team_id=team_id)
+                if not allowed:
+                    self.audit_logger.log(
+                        AuditLogEntry(
+                            query_id=query_id,
+                            username=user.username,
+                            role=effective_role,
+                            query=query,
+                            intent=intent_result.intent,
+                            outcome="access_denied",
+                            rbac_violation=True,
+                            response_time_ms=round((time.perf_counter() - start) * 1000, 2),
+                            timestamp=now,
+                            metadata={"denied_source": denied_source.value},
+                        )
                     )
-                )
-                return AccessDeniedResponse(
-                    query=query,
-                    message=(
-                        f"Access Denied: You do not have permission to access "
-                        f"{denied_source.value.replace('_', ' ')}."
-                    ),
-                    required_permission=denied_source,
-                    query_id=query_id,
-                    timestamp=now,
-                )
+                    return AccessDeniedResponse(
+                        query=query,
+                        message=(
+                            f"Access Denied: You do not have permission to access "
+                            f"{denied_source.value.replace('_', ' ')}."
+                        ),
+                        required_permission=denied_source,
+                        query_id=query_id,
+                        timestamp=now,
+                    )
 
         # Step 4: Route to data sources
-        routed_sources = self.query_router.route(intent_result, user.role, query)
+        routed_sources = await self.query_router.route(intent_result, ctx, query, team_id=team_id)
         print(f"Route: {routed_sources}")
         if not routed_sources:
             self.audit_logger.log(
                 AuditLogEntry(
                     query_id=query_id,
                     username=user.username,
-                    role=user.role,
+                    role=effective_role,
                     query=query,
                     intent=intent_result.intent,
                     outcome="access_denied_no_sources",
@@ -174,7 +192,7 @@ class RAGPipeline:
             AuditLogEntry(
                 query_id=query_id,
                 username=user.username,
-                role=user.role,
+                role=effective_role,
                 query=query,
                 intent=intent_result.intent,
                 outcome="success",

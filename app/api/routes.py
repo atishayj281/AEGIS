@@ -9,7 +9,10 @@ from app.api.deps import (
     get_pipeline,
     get_vector_store,
     get_conversation_manager_dep,
+    get_db,
 )
+from sqlalchemy.ext.asyncio import AsyncSession
+from app.auth.rbac import resolve_access
 from app.auth.jwt_auth import User
 from app.models.schemas import (
     AccessDeniedResponse,
@@ -40,12 +43,15 @@ async def query(
     request: QueryRequest,
     user: User = Depends(get_current_user),
     pipeline: RAGPipeline = Depends(get_pipeline),
+    db: AsyncSession = Depends(get_db),
 ):
     return await pipeline.process_query(
         request.query,
         user,
+        db=db,
         top_k=request.top_k,
         session_id=request.session_id,
+        team_id=request.team_id,
     )
 
 
@@ -153,19 +159,25 @@ async def upload_document(
     data_source: DataSource = Form(...),
     user: User = Depends(get_current_user),
     vector_store: VectorStore = Depends(get_vector_store),
+    db: AsyncSession = Depends(get_db),
 ):
-    from app.auth.rbac import RBACEngine
     from app.document.parser import DocumentParser
     from app.config import get_settings
 
     settings = get_settings()
-    rbac = RBACEngine()
 
     # Enforce RBAC validation
-    if not rbac.can_access(user.role, data_source):
+    ctx = {
+        "db": db,
+        "user_id": user.db_id,
+        "org_id": user.org_id,
+        "roles": user.roles,
+        "team_ids": user.team_ids,
+    }
+    if not await resolve_access(ctx, data_source.value, team_id=None):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail=f"Access Denied: Your role '{user.role.value}' does not have permission to write to {data_source.value}.",
+            detail=f"Access Denied: You do not have permission to write to {data_source.value}.",
         )
 
     # Sanitize and get filename
@@ -260,14 +272,21 @@ async def upload_document(
 async def list_documents(
     user: User = Depends(get_current_user),
     vector_store: VectorStore = Depends(get_vector_store),
+    db: AsyncSession = Depends(get_db),
 ):
     from app.config import get_settings
     from app.retrieval.vector_store import DOCUMENT_SOURCE_MAP
-    from app.auth.rbac import RBACEngine
     import json
 
     settings = get_settings()
-    rbac = RBACEngine()
+
+    ctx = {
+        "db": db,
+        "user_id": user.db_id,
+        "org_id": user.org_id,
+        "roles": user.roles,
+        "team_ids": user.team_ids,
+    }
 
     # Load registry
     registry = {}
@@ -319,7 +338,7 @@ async def list_documents(
                 try:
                     from app.models.domain import DataSource
                     ds_enum = DataSource(ds_val)
-                    if not rbac.can_access(user.role, ds_enum):
+                    if not await resolve_access(ctx, ds_enum.value, team_id=None):
                         continue # Skip unauthorized files
                 except Exception:
                     pass
@@ -350,15 +369,22 @@ async def get_document(
     filename: str,
     user: User = Depends(get_current_user),
     vector_store: VectorStore = Depends(get_vector_store),
+    db: AsyncSession = Depends(get_db),
 ):
     from app.config import get_settings
     from app.retrieval.vector_store import DOCUMENT_SOURCE_MAP
-    from app.auth.rbac import RBACEngine
     from app.models.domain import DataSource
     import json
 
     settings = get_settings()
-    rbac = RBACEngine()
+
+    ctx = {
+        "db": db,
+        "user_id": user.db_id,
+        "org_id": user.org_id,
+        "roles": user.roles,
+        "team_ids": user.team_ids,
+    }
 
     # Find the file on disk
     target_path = None
@@ -409,7 +435,7 @@ async def get_document(
     # Enforce RBAC
     try:
         ds_enum = DataSource(ds_val)
-        if not rbac.can_access(user.role, ds_enum):
+        if not await resolve_access(ctx, ds_enum.value, team_id=None):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=f"Access Denied: Your role does not have permission to view {ds_val}.",
@@ -452,14 +478,22 @@ async def delete_document(
     filename: str,
     user: User = Depends(get_current_user),
     vector_store: VectorStore = Depends(get_vector_store),
+    db: AsyncSession = Depends(get_db),
 ):
     from app.config import get_settings
-    from app.models.domain import UserRole, DataSource
-    from app.auth.rbac import RBACEngine
+    from app.models.domain import DataSource
     import json
 
+    ctx = {
+        "db": db,
+        "user_id": user.db_id,
+        "org_id": user.org_id,
+        "roles": user.roles,
+        "team_ids": user.team_ids,
+    }
+
     # RBAC: Only Admin can delete documents
-    if user.role != UserRole.ADMIN:
+    if not await resolve_access(ctx, "*", team_id=None):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Access Denied: Only Administrators can delete documents.",

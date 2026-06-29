@@ -50,21 +50,21 @@ def mock_jwks():
     token_payloads: dict[str, dict] = {
         "valid_admin_token": _make_auth0_payload(
             sub="auth0|admin",
-            org_id="org_acme",
-            team_ids=["team_eng"],
-            roles={"team_eng": "org_admin"},
+            org_id="00000000-0000-0000-0000-000000000001",
+            team_ids=["10000000-0000-0000-0000-000000000001"],
+            roles={"10000000-0000-0000-0000-000000000001": "org_admin"},
         ),
         "valid_employee_token": _make_auth0_payload(
             sub="auth0|employee",
-            org_id="org_acme",
-            team_ids=["team_hr"],
-            roles={"team_hr": "employee"},
+            org_id="00000000-0000-0000-0000-000000000001",
+            team_ids=["10000000-0000-0000-0000-000000000002"],
+            roles={"10000000-0000-0000-0000-000000000002": "employee"},
         ),
         "valid_finance_token": _make_auth0_payload(
             sub="auth0|finance",
-            org_id="org_acme",
-            team_ids=["team_finance"],
-            roles={"team_finance": "finance_analyst"},
+            org_id="00000000-0000-0000-0000-000000000001",
+            team_ids=["10000000-0000-0000-0000-000000000003"],
+            roles={"10000000-0000-0000-0000-000000000003": "finance_analyst"},
         ),
     }
 
@@ -132,41 +132,7 @@ def test_malformed_bearer_rejected(mock_jwks):
     )
 
 
-# ---------------------------------------------------------------------------
-# Tests: role mapping from custom claims
-# ---------------------------------------------------------------------------
 
-def test_role_mapping_admin(mock_jwks):
-    """org_admin in roles claim → ADMIN UserRole → access to admin endpoints."""
-    from app.api.deps import _map_roles_to_user_role
-    from app.models.domain import UserRole
-
-    role = _map_roles_to_user_role({"team_eng": "org_admin"})
-    assert role == UserRole.ADMIN
-
-
-def test_role_mapping_finance_analyst(mock_jwks):
-    from app.api.deps import _map_roles_to_user_role
-    from app.models.domain import UserRole
-
-    role = _map_roles_to_user_role({"team_finance": "finance_analyst"})
-    assert role == UserRole.FINANCE_ANALYST
-
-
-def test_role_mapping_unknown_defaults_to_employee(mock_jwks):
-    from app.api.deps import _map_roles_to_user_role
-    from app.models.domain import UserRole
-
-    role = _map_roles_to_user_role({"team_x": "unknown_role"})
-    assert role == UserRole.EMPLOYEE
-
-
-def test_role_mapping_empty_defaults_to_employee():
-    from app.api.deps import _map_roles_to_user_role
-    from app.models.domain import UserRole
-
-    role = _map_roles_to_user_role({})
-    assert role == UserRole.EMPLOYEE
 
 
 # ---------------------------------------------------------------------------

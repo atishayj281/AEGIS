@@ -5,8 +5,7 @@ The backend only validates the RS256 JWT that the frontend passes
 as a Bearer token (see app/auth/auth0_verify.py).
 """
 
-from app.models.domain import UserRole
-
+import uuid
 
 class User:
     """Represents an authenticated user extracted from an Auth0 JWT."""
@@ -14,14 +13,14 @@ class User:
     def __init__(
         self,
         username: str,
-        role: UserRole,
-        department: str,
+        db_id: uuid.UUID | None = None,
+        department: str = "General",
         org_id: str | None = None,
         team_ids: list[str] | None = None,
         roles: dict[str, str] | None = None,
     ):
         self.username = username
-        self.role = role
+        self.db_id = db_id
         self.department = department
         self.org_id = org_id
         self.team_ids = team_ids or []
