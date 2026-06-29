@@ -11,7 +11,7 @@ from fastapi.testclient import TestClient
 
 from app.api.deps import get_vector_store
 from app.auth.jwt_auth import User
-from app.models.domain import DataSource, UserRole
+from app.models.domain import DataSource
 from main import app
 
 client = TestClient(app)
@@ -19,16 +19,16 @@ client = TestClient(app)
 # --- Token/Auth mock shared fixture -------------------------------------------
 _UPLOAD_TOKEN_PAYLOADS = {
     "admin_token": {
-        "user_id": "admin_user",
-        "org_id": "org_test",
-        "team_ids": ["team_it"],
-        "roles": {"team_it": "org_admin"},
+        "user_id": "auth0|admin",
+        "org_id": "00000000-0000-0000-0000-000000000001",
+        "team_ids": ["10000000-0000-0000-0000-000000000001"],
+        "roles": {"10000000-0000-0000-0000-000000000001": "org_admin"},
     },
     "employee_token": {
-        "user_id": "employee_user",
-        "org_id": "org_test",
-        "team_ids": ["team_hr"],
-        "roles": {"team_hr": "employee"},
+        "user_id": "auth0|employee",
+        "org_id": "00000000-0000-0000-0000-000000000001",
+        "team_ids": ["10000000-0000-0000-0000-000000000002"],
+        "roles": {"10000000-0000-0000-0000-000000000002": "employee"},
     },
 }
 

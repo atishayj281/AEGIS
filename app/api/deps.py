@@ -14,7 +14,6 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from app.auth.auth0_verify import verify_token, get_current_context
 from app.auth.jwt_auth import User
 from app.config import get_settings
-from app.models.domain import UserRole
 from app.pipeline import RAGPipeline
 from app.retrieval.vector_store import VectorStore
 from app.conversation.manager import ConversationManager, get_conversation_manager
@@ -90,25 +89,11 @@ def get_pipeline() -> RAGPipeline:
     return _pipeline
 
 
-def _map_roles_to_user_role(roles_claim: dict) -> UserRole:
-    """Map Auth0 custom roles dict (team_id → role_name) to a single UserRole.
-
-    Priority order mirrors the RBAC permission hierarchy.
-    """
-    values = set(roles_claim.values())
-    if "admin" in values or "org_admin" in values:
-        return UserRole.ADMIN
-    if "compliance_officer" in values:
-        return UserRole.COMPLIANCE_OFFICER
-    if "finance_analyst" in values:
-        return UserRole.FINANCE_ANALYST
-    if "operations_engineer" in values:
-        return UserRole.OPERATIONS_ENGINEER
-    return UserRole.EMPLOYEE
-
+from sqlalchemy import text
 
 async def get_current_user(
     credentials: HTTPAuthorizationCredentials = Depends(security),
+    db: AsyncSession = Depends(get_db),
 ) -> User:
     """Verify the Auth0 Bearer token and return the authenticated User.
 
@@ -125,10 +110,20 @@ async def get_current_user(
             headers={"WWW-Authenticate": "Bearer"},
         ) from e
 
+    username = payload.get("user_id", "unknown")
     roles_claim = payload.get("roles") or {}
+    
+    # Query database to retrieve user ID
+    result = await db.execute(
+        text("SELECT id FROM users WHERE auth0_sub = :sub"),
+        {"sub": username}
+    )
+    row = result.fetchone()
+    db_id = row[0] if row else None
+
     return User(
-        username=payload.get("user_id", "unknown"),
-        role=_map_roles_to_user_role(roles_claim),
+        username=username,
+        db_id=db_id,
         department="General",
         org_id=payload.get("org_id"),
         team_ids=payload.get("team_ids", []),

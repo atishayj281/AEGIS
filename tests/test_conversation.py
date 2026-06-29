@@ -16,7 +16,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from app.api.deps import get_conversation_manager_dep
 from app.auth.jwt_auth import User
 from app.conversation.manager import ConversationManager, ConversationTurn, get_conversation_manager
-from app.models.domain import UserRole
 from main import app
 
 client = TestClient(app)
@@ -24,16 +23,16 @@ client = TestClient(app)
 # --- JWKS mock payloads -------------------------------------------------------
 _CONV_TOKEN_PAYLOADS = {
     "alice_token": {
-        "user_id": "alice",
-        "org_id": "org_test",
-        "team_ids": ["team_hr"],
-        "roles": {"team_hr": "employee"},
+        "user_id": "auth0|employee",
+        "org_id": "00000000-0000-0000-0000-000000000001",
+        "team_ids": ["10000000-0000-0000-0000-000000000002"],
+        "roles": {"10000000-0000-0000-0000-000000000002": "employee"},
     },
     "bob_token": {
-        "user_id": "bob",
-        "org_id": "org_test",
-        "team_ids": ["team_hr"],
-        "roles": {"team_hr": "employee"},
+        "user_id": "auth0|ops",
+        "org_id": "00000000-0000-0000-0000-000000000001",
+        "team_ids": ["10000000-0000-0000-0000-000000000001"],
+        "roles": {"10000000-0000-0000-0000-000000000001": "operations_engineer"},
     },
 }
 

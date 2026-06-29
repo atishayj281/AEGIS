@@ -43,7 +43,7 @@ No phase may run concurrently with another. Each depends strictly on the one bef
 phase_id: phase_1
 branch: feature/auth0
 depends_on: []
-status: not_started
+status: complete
 ```
 
 ### Rationale (one line, for context only)
@@ -108,7 +108,7 @@ pytest tests/test_auth_auth0.py::test_invalid_token_returns_401 -v
 phase_id: phase_2
 branch: feature/postgres-rls
 depends_on: [phase_1]
-status: not_started
+status: complete
 ```
 
 ### Tasks
@@ -207,18 +207,91 @@ depends_on: [phase_2]
 status: not_started
 ```
 
+### Discovery findings folded into this phase (2026-06-28)
+
+Repo inspection ahead of this phase surfaced three gaps between the plan's
+assumptions and what Phase 1/2 actually left behind. All three are now
+explicit tasks below rather than implicit sub-steps, so each gets its own
+test instead of being verified only as a side effect of 3.3/3.4:
+
+1. `team_memberships` (created in Phase 2's `0001_tenancy_schema.py`) has
+   no `expires_at` column — task 3.3's step 3 requires one. New migration:
+   task 3.1a.
+2. `resource_grants` does not exist anywhere in the schema. The original
+   plan buried its creation inside 3.3 (the resolver-logic task) as an
+   aside ("create this table... if it does not exist"). Pulled out into
+   its own task (3.1b) so schema creation is verified independently of
+   resolver logic, matching how 3.1a is handled.
+3. **This is the one that actually changes behavior, not just schema.**
+   `app/api/deps.py::_map_roles_to_user_role` currently collapses Auth0's
+   `roles` claim — which is a real `team_id -> role_name` dict, already
+   present on the verified JWT — down into a single flattened `UserRole`
+   per user, before any route ever sees it. `resolve_access(ctx,
+   data_source_type, team_id)` is supposed to resolve a *per-team* role,
+   but by the time `ctx`/`user` reaches any call site today, the
+   per-team information is already gone. Per-team resolution must
+   replace the flattening, not sit alongside it — leaving both would mean
+   two disagreeing sources of truth for "what role does this user have,"
+   which defeats the purpose of this phase. New task: 3.0, sequenced
+   first since 3.1's seeding and 3.3's resolver both depend on real
+   per-team roles existing end-to-end, not just in the DB.
+
 ### Tasks
+
+**3.0 — Replace flattened role mapping with per-team role resolution**
+- File: `app/api/deps.py`
+- Remove `_map_roles_to_user_role` and its single `UserRole` field on the
+  context/user object entirely — do not keep it as a fallback. Every call
+  site that read `user.role` is, by definition, a call site 3.4 must
+  update; leaving the flattened field in place would let an unmigrated
+  call site silently keep working off stale logic instead of failing
+  loudly.
+- Add a function (e.g. `get_role_for_team(roles_claim: dict, team_id: str) -> str | None`)
+  that looks up `roles_claim.get(team_id)` directly from the JWT's
+  already-verified `roles` dict (`team_id -> role_name`, populated by the
+  Auth0 Action from Phase 1 — no new claim shape needed, the data was
+  already there).
+- Update the `User` object (or `ctx` dict, whichever 3.3/3.4 standardize
+  on) to drop `role: UserRole` and keep `roles: dict` and `team_ids: list`
+  as the only source of role information. `org_id` stays as-is — this
+  task only touches role flattening, not tenant scoping.
+- This task has no independent pytest target in this phase's Verification
+  section because its correctness is only observable through 3.3/3.4's
+  tests (a per-team role resolves correctly) and is covered by
+  `test_legacy_single_team_user_unchanged` — a user with exactly one team
+  must resolve to the same effective permissions as the old flattened
+  behavior did, so the replacement is provably non-regressive for the
+  common case even though the mechanism changed.
 
 **3.1 — Seed team memberships for test orgs**
 - File: `scripts/seed_team_memberships.py` (new file)
 - For `acme-corp` and `globex-inc` (created in Phase 1/2), create at least one team each, and assign the 7 roles below across test users: `org_admin`, `team_lead`, `compliance_officer`, `finance_analyst`, `operations_engineer`, `employee`, `guest`.
+- Depends on 3.0 — seed data is only meaningful once roles are resolved per-team rather than flattened.
+
+**3.1a — Add `expires_at` to `team_memberships`**
+- File: `alembic/versions/0003_team_membership_expiry.py` (new migration, depends on `0002`)
+- `ALTER TABLE team_memberships ADD COLUMN expires_at timestamptz NULL;`
+- Down-migration: `ALTER TABLE team_memberships DROP COLUMN expires_at;`
+- Nullable, no default — an absent `expires_at` means "does not expire," consistent with how 3.3 step 3 treats `NULL` (skip the expiry check, not "treat as already expired").
+
+**3.1b — Create `resource_grants` table**
+- File: `alembic/versions/0004_resource_grants.py` (new migration, depends on `0003`)
+- Columns: `id (uuid, pk)`, `org_id (uuid, fk -> organizations.id)`, `user_id (uuid, fk -> users.id)`, `data_source_id (uuid, fk -> data_sources.id)`, `granted_at (timestamptz, default now())`, `expires_at (timestamptz, nullable)`.
+- `org_id` included and RLS-enabled on this table too (same `tenant_isolation` policy pattern as migration `0002`) — every other tenant-scoped table got this in Phase 2, and a resource grant is exactly the kind of row that must not leak across orgs.
+- Down-migration: drop the RLS policy, then drop the table.
 
 **3.2 — Role permission map**
-- File: `app/auth/rbac.py` (new file, or modify existing RBAC module if one exists from the demo)
-- Define exactly:
+- File: `app/auth/rbac.py` (modify existing RBAC module — confirmed present from Phase 1/2 discovery; do not create a second file)
+- Existing `ROLE_PERMISSIONS` in this file is keyed on `UserRole` enum values
+  and `DataSource` enum values from the original single-tenant demo. Do not
+  delete it yet — `RBACEngine.can_access` etc. remain in place until 3.4
+  confirms every call site has moved off them, per the "earlier phases run
+  old and new paths side by side" rule. The dict below is the *new*,
+  string-keyed map `resolve_access` (3.3) reads from; it is additive in
+  this task, superseding the old dict only once 3.4 finishes:
 
 ```python
-ROLE_PERMISSIONS = {
+ROLE_PERMISSIONS_V2 = {
     "org_admin":           {"*"},
     "team_lead":           {"*"},
     "compliance_officer":  {"compliance_records", "audit_logs", "public_policies"},
@@ -233,14 +306,16 @@ ROLE_PERMISSIONS = {
 - File: `app/auth/rbac.py` (same file as 3.2)
 - Implement `resolve_access(ctx: dict, data_source_type: str, team_id: str | None) -> bool` following this exact step order (do not reorder — each step may only narrow access, never widen it):
   1. Tenant filter is implicit — RLS (Phase 2) already scopes any DB query to `ctx["org_id"]` before this function is called. Do not re-implement tenant filtering here.
-  2. Look up team membership for `(ctx["user_id"], team_id)`. If no membership exists, skip to step 4.
-  3. If membership has a non-null `expires_at` and it is in the past, return `False` immediately.
-  4. Check `ROLE_PERMISSIONS[membership.role]` — if it contains `"*"` or `data_source_type`, return `True`.
-  5. Fall back to checking an explicit resource-level grant table (`resource_grants` — create this table via a new Alembic migration if it does not exist: columns `id, user_id, data_source_id, granted_at, expires_at nullable`). Return `True` only if a non-expired grant exists for this exact `data_source_id`.
+  2. Look up team membership for `(ctx["user_id"], team_id)` — this is a real DB lookup against `team_memberships` (not `ctx["roles"]` from the JWT; the JWT claim from 3.0 tells you *which* teams/roles existed at token-issue time, but `team_memberships` is the authoritative, revocable record). If no membership exists, skip to step 4.
+  3. If membership has a non-null `expires_at` (column added in 3.1a) and it is in the past, return `False` immediately.
+  4. Check `ROLE_PERMISSIONS_V2[membership.role]` (3.2) — if it contains `"*"` or `data_source_type`, return `True`.
+  5. Fall back to checking `resource_grants` (table created in 3.1b). Return `True` only if a non-expired grant exists for this exact `data_source_id`.
 
 **3.4 — Wire resolver into existing routes**
-- Files: every route in `app/api/` that currently performs an authorization check (locate via the existing demo's RBAC matrix implementation before modifying).
-- Replace ad hoc role checks with calls to `resolve_access`. Pass `team_id` through from the request context — if the existing query/intent classification layer (`app/intent/`, `app/routing/`) does not currently carry `team_id`, add it as a required field on the relevant request/context objects.
+- Files: `app/api/routes.py` — four confirmed call sites (`rbac.can_access(user.role, data_source)` at the upload-time check, the query-time loop, the second query-time check, and a direct `UserRole.ADMIN` check guarding document deletion). Locate the exact current line numbers before editing, since line numbers drift; match by the `rbac.can_access(` and `UserRole.ADMIN` substrings instead of by line number.
+- Replace every one of these four with a call to `resolve_access`. Pass `team_id` through from the request context — if the existing query/intent classification layer (`app/intent/`, `app/routing/`) does not currently carry `team_id`, add it as a required field on the relevant request/context objects.
+- The direct `if user.role != UserRole.ADMIN` delete-route check has no `data_source_type` to check against — it's a pure role gate, not a per-source one. Translate it to `resolve_access(ctx, "*", team_id=None)` (org-wide admin check, no specific data source) rather than inventing a second, parallel admin-check helper.
+- Once all four call sites are confirmed migrated (by the tests below passing), remove `ROLE_PERMISSIONS`, `RBACEngine`, and the old `UserRole`-keyed permission dict from `app/auth/rbac.py` in this same task — per 3.2's note, the old path was only kept alive until this point.
 
 ### Verification
 
@@ -249,9 +324,10 @@ pytest tests/test_rbac.py::test_different_teams_different_permissions -v
 pytest tests/test_rbac.py::test_guest_resource_grant_only -v
 pytest tests/test_rbac.py::test_expired_guest_grant_denied -v
 pytest tests/test_rbac.py::test_legacy_single_team_user_unchanged -v
+grep -rn "UserRole.ADMIN\|rbac.can_access(" app/api/routes.py ; test $? -ne 0
 ```
 
-**Phase 3 is complete only if all four tests pass.**
+**Phase 3 is complete only if all four pytest targets pass and the grep finds zero remaining direct role checks in `routes.py` (confirming 3.4's old-path removal actually happened, not just that the new path also works).**
 
 ---
 
