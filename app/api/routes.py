@@ -3,6 +3,8 @@
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form
 from pathlib import Path
 
+from app.db.storage import store_document, delete_document as object_storage_delete
+
 from app import __version__
 from app.api.deps import (
     get_current_user,
@@ -199,12 +201,15 @@ async def upload_document(
             detail=f"Unsupported file extension: {ext}",
         )
 
-    # Read bytes and save locally
+    # Read bytes and store via org-prefixed object storage (task 4.5)
     file_bytes = await file.read()
-    target_dir.mkdir(parents=True, exist_ok=True)
-    file_path = target_dir / filename
     try:
-        file_path.write_bytes(file_bytes)
+        storage_uri = store_document(
+            org_id=user.org_id,
+            data_source_id=data_source.value,
+            filename=filename,
+            file_bytes=file_bytes,
+        )
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -233,11 +238,8 @@ async def upload_document(
             text = DocumentParser.parse_image(file_bytes, filename)
             chunks = vector_store._semantic_chunk_text(text)
 
-        chunks_ingested = vector_store.ingest_chunks(chunks, filename, data_source)
+        chunks_ingested = vector_store.ingest_chunks(user.org_id, chunks, filename, data_source)
     except Exception as e:
-        # Clean up file on error
-        if file_path.exists():
-            file_path.unlink()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to parse or ingest file: {str(e)}",
@@ -530,18 +532,18 @@ async def delete_document(
             detail=f"Failed to delete file from disk: {str(e)}",
         )
 
-    # Delete points from Qdrant vector store
-    from qdrant_client.http.models import Filter, FieldCondition, MatchValue
+    # Delete vectors from Pinecone namespace (task 4.3 — routes through VectorStore, never direct client)
+    vector_store.delete_by_source(user.org_id, filename)
+
+    # Delete from object storage (task 4.5)
     try:
-        if vector_store._client.collection_exists(vector_store.COLLECTION_NAME):
-            vector_store._client.delete(
-                collection_name=vector_store.COLLECTION_NAME,
-                points_selector=Filter(
-                    must=[FieldCondition(key="source_name", match=MatchValue(value=filename))]
-                )
-            )
+        object_storage_delete(
+            org_id=user.org_id,
+            data_source_id="unknown",  # registry lookup not yet available at delete time
+            filename=filename,
+        )
     except Exception as e:
-        print(f"Warning: failed to delete points from vector store for {filename}: {e}")
+        print(f"Warning: failed to delete object from storage for {filename}: {e}")
 
     # Remove from registry
     registry_path = settings.data_dir / "documents_registry.json"

@@ -33,6 +33,7 @@ class ContextAggregator:
         self,
         query: str,
         allowed_sources: list[DataSource],
+        org_id: str,           # required — no default; scopes vector search to this org's namespace
         top_k: int = 5,
     ) -> RetrievedContext:
         context = RetrievedContext()
@@ -41,7 +42,7 @@ class ContextAggregator:
         # Vector retrieval
         start = time.perf_counter()
         try:
-            vector_results = self.vector_store.search(query, allowed_sources, top_k=top_k)
+            vector_results = self.vector_store.search(query, allowed_sources, org_id=org_id, top_k=top_k)
             latency = (time.perf_counter() - start) * 1000
             context.traces.append(
                 RetrievalTrace(

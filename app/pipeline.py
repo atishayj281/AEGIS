@@ -164,8 +164,8 @@ class RAGPipeline:
                 timestamp=now,
             )
 
-        # Step 5: Hybrid retrieval
-        context = self.aggregator.retrieve(query, routed_sources, top_k=top_k)
+        # Step 5: Hybrid retrieval — scoped to this user's org namespace
+        context = self.aggregator.retrieve(query, routed_sources, org_id=user.org_id, top_k=top_k)
         print(f"Context: {context}")
         # Step 6: Grounded response
         answer, confidence = await self.response_generator.generate(
