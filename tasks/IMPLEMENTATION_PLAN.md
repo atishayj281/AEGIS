@@ -1,7 +1,7 @@
 # Implementation Plan — Enterprise RAG Intelligence Platform Multi-Tenancy Migration
 
 ```yaml
-plan_version: 1.0
+plan_version: 1.1
 target_repo: enterprise-rag-platform
 migration_type: incremental
 base_branch: main
@@ -28,7 +28,7 @@ total_phases: 6
 phase_1 (auth0)
   └── phase_2 (postgres_rls)
         └── phase_3 (rbac_v2)
-              └── phase_4 (qdrant_storage)
+              └── phase_4 (pinecone_storage)
                     └── phase_5 (redis_scale)
                           └── phase_6 (compliance_audit)
 ```
@@ -204,7 +204,7 @@ grep -r "sqlite3" app/ --include="*.py" | grep -v "^Binary" ; test $? -ne 0
 phase_id: phase_3
 branch: feature/rbac-v2
 depends_on: [phase_2]
-status: not_started
+status: complete
 ```
 
 ### Discovery findings folded into this phase (2026-06-28)
@@ -331,92 +331,218 @@ grep -rn "UserRole.ADMIN\|rbac.can_access(" app/api/routes.py ; test $? -ne 0
 
 ---
 
-## Phase 4 — Vector & Storage Isolation: Qdrant + Object Storage
+## Phase 4 — Vector & Storage Isolation: Pinecone (namespace-per-org) + Object Storage
 
 ```yaml
 phase_id: phase_4
-branch: feature/qdrant-storage
+branch: feature/pinecone-storage
 depends_on: [phase_3]
 status: not_started
+superseded_plan: qdrant_storage (see "Revision note" below)
 ```
+
+### Revision note (2026-06-30)
+
+The original Phase 4 plan (`feature/qdrant-storage`, written before any repo discovery)
+assumed: (a) `app/retrieval/vector_store.py` did not yet exist and would be created fresh,
+(b) the codebase was actively running Milvus and needed a Milvus→Qdrant migration script,
+and (c) tenant isolation would be enforced via payload filtering on `org_id`/`team_id`
+inside one or more Qdrant collections.
+
+Discovery (this session) found all three assumptions wrong:
+
+1. `app/retrieval/vector_store.py` already exists and is a mature, Qdrant-backed
+   `VectorStore` class — lazy collection creation, idempotent payload-index
+   bootstrapping, and a semantic chunking pipeline (`SemanticChunker` +
+   `NVIDIAEmbeddings`) already wired through it.
+2. No Milvus client exists anywhere on `aegis-handler`. The one `milvus_db_path`
+   reference in the file is dead/commented-out legacy naming, not a live system.
+   There is nothing to migrate *from* — Milvus was never live on this branch.
+3. **Critically, the existing `VectorStore` has no tenant isolation at all.**
+   There is no `org_id` or `team_id` anywhere in the payload schema, the ingest
+   path, or `search()`. The single collection (`enterprise_documents`) is shared
+   across every org. RBAC (Phase 3) correctly gates which `DataSource` categories
+   a user may query, but does nothing to stop a user in `acme-corp` from
+   retrieving chunks that belong to `globex-inc`. This is the actual gap Phase 4
+   must close — the Postgres-RLS tenant boundary from Phase 2 does not currently
+   extend to the vector layer.
+
+Separately, after discovery, the vendor decision itself changed: this phase
+moves off Qdrant onto **Pinecone**, using **one namespace per `org_id`** rather
+than payload-filtering within a shared index/collection. This is a deliberate,
+explicit revision to the architecture-decision log (previously: "Qdrant over
+Milvus" — see `MIGRATION_STATE.md` discovery notes), not an accidental drift.
+Rationale and tradeoffs accepted going in:
+
+- **Why namespaces over payload filtering:** a Pinecone namespace is a hard
+  isolation boundary enforced by the index itself — a query is scoped to
+  exactly one namespace per call. This is a stronger guarantee than "trust
+  that every call site remembers to apply the org_id filter," which is the
+  failure mode the Phase 4 plan (in either vendor) exists to eliminate.
+- **Tradeoff accepted — no local dev parity:** Pinecone is API-only, hosted
+  service, no local emulator. The `docker-compose.yml` Qdrant service this
+  plan originally specified (task 4.1) does not have a Pinecone equivalent.
+  Local/dev/CI work against a real (or sandboxed) Pinecone index over the
+  network from this phase onward.
+- **Tradeoff accepted — serverless cost curve:** Pinecone serverless pricing
+  is per-Read-Unit, scaling with namespace size queried; at low query volume
+  this is cheap-to-free, but there is a well-documented "scale cliff" at
+  high query volume / large namespaces where self-hosted alternatives become
+  cheaper. Not a concern at current/demo scale; worth revisiting if/when
+  query volume grows materially.
+- **What's being thrown away:** the existing Qdrant `VectorStore`
+  implementation (collection lifecycle, payload-index bootstrapping,
+  chunking pipeline wiring) is being replaced, not extended. The chunking
+  pipeline itself (`SemanticChunker` + `NVIDIAEmbeddings`) is vendor-agnostic
+  and is preserved as-is; only the storage/query backend changes.
+
+The task list below replaces the original Phase 4 task list in full. Tasks
+4.4 ("migrate from Milvus") and the Qdrant-specific collection/payload-index
+tasks (original 4.1–4.3) are dropped as moot. Task numbering restarts at 4.1
+under the new plan to avoid any ambiguity with the superseded version.
 
 ### Tasks
 
-**4.1 — Provision Qdrant**
-- Add a `qdrant` service to `docker-compose.yml` (image `qdrant/qdrant`) for local dev.
-- Add `QDRANT_URL` to `.env.example`.
-- Add `qdrant-client` to `requirements.txt`.
+**4.1 — Provision Pinecone**
+- Action: manual, outside codebase. Create a Pinecone project and a single
+  serverless index (e.g. `aegis-documents`), with vector dimension matching
+  the existing NVIDIA embedding model's output (`nvidia/nv-embed-v1` —
+  confirm exact dimension from the model docs or by inspecting a live
+  embedding call before creating the index; do not guess).
+- Add `PINECONE_API_KEY` and `PINECONE_INDEX_NAME` to `.env.example`
+  (placeholder values only).
+- Add `pinecone` (the current official Python SDK package — confirm exact
+  package name, as it has changed across SDK versions) to `requirements.txt`.
+- Remove `qdrant-client` from `requirements.txt` once 4.3 confirms no
+  remaining references.
 
-**4.2 — Define collections and payload schema**
-- File: `app/retrieval/vector_store.py` (new file; remove/replace any existing Milvus-specific module after this phase's verification passes, not before)
-- Create one collection per logical content type: `documents`, `public_policies` (adjust names to match actual content types in the existing demo's data folders).
-- Every point's payload must include: `org_id` (string, indexed), `team_id` (string, indexed, nullable), `data_source_type` (string), plus existing chunk metadata fields from the current ingestion pipeline.
-- Create a payload index on `org_id` and `team_id` for each collection (`client.create_payload_index(...)`).
+**4.2 — Rewrite `VectorStore` for Pinecone, namespace-per-org**
+- File: `app/retrieval/vector_store.py` (modify in place — this file
+  already exists; do not create a second module)
+- Replace the `QdrantClient` instantiation with a Pinecone client + handle
+  to the single index created in 4.1. There is no per-content-type
+  collection split (matching the existing single-collection design) —
+  content-type filtering (`data_source`) continues to work as a metadata
+  filter *within* a namespace, same as it does today within the Qdrant
+  collection.
+- Every ingest and query operation must take a required `org_id: str`
+  parameter with **no default value** — omitting it must raise `TypeError`
+  at call time, not silently fall through to an unscoped operation. This
+  mirrors the "no default value" principle from the original plan's 4.3/4.5
+  and is non-negotiable for the same reason: a missing `org_id` must fail
+  loudly, not search/write unfiltered.
+- Namespace naming: use the `org_id` value directly as the Pinecone
+  namespace string (Pinecone namespaces are plain strings scoped to an
+  index, no separate provisioning step required — confirm this against
+  current Pinecone SDK docs before implementing, since namespace handling
+  has changed across SDK versions).
+- `team_id`, where present, continues to be carried as point/vector
+  metadata (not a second namespace dimension) and filtered on at query
+  time within the org's namespace — splitting namespaces further by team
+  is out of scope for this phase unless a concrete need surfaces.
+- Preserve `_semantic_chunk_text`, `_chunker`, and `_embedding_model` as-is;
+  only the storage/query backend (currently `self._client = QdrantClient(...)`
+  and the `_ensure_collection` / `_ensure_payload_indexes` / `upsert` /
+  `query_points` calls) is replaced.
+- `DOCUMENT_SOURCE_MAP` and `FILTERABLE_PAYLOAD_FIELDS`-equivalent metadata
+  handling (`data_source`) is preserved; `org_id` (and `team_id` where
+  applicable) are added as additional required metadata fields on every
+  upserted point.
 
-**4.3 — Mandatory-filter search wrapper**
+**4.3 — Mandatory-namespace search wrapper**
 - File: `app/retrieval/vector_store.py` (same file as 4.2)
-- Implement:
+- `search()` signature gains a required `org_id: str` parameter (no
+  default), used to select the Pinecone namespace for the query. As in the
+  original plan's 4.3, this must be the **only** function in the codebase
+  that calls the Pinecone query API directly — search the codebase for any
+  other direct Pinecone client calls and route them through this function.
+  If a call site cannot be routed through this function, stop and report
+  why rather than adding a second unfiltered search path.
+- Confirm via `grep -rn "qdrant\|QdrantClient" app/ --include="*.py"` that
+  no other module references the old client directly before considering
+  this task complete.
 
-```python
-def search(
-    collection: str,
-    query_vector: list[float],
-    org_id: str,
-    team_id: str | None = None,
-    extra_filter: Filter | None = None,
-    limit: int = 10,
-):
-    must = [FieldCondition(key="org_id", match=MatchValue(value=org_id))]
-    if team_id:
-        must.append(FieldCondition(key="team_id", match=MatchValue(value=team_id)))
-    if extra_filter:
-        must.extend(extra_filter.must or [])
-    return client.search(
-        collection_name=collection,
-        query_vector=query_vector,
-        query_filter=Filter(must=must),
-        limit=limit,
-    )
-```
-
-- `org_id` has no default value. This is intentional — omitting it must raise `TypeError` at call time, not silently search unfiltered.
-- Constraint: this must be the only function in the codebase that calls `client.search(...)` directly. Search the codebase for any other direct Qdrant/Milvus client calls and route them through this function. If a call site cannot be routed through this function, stop and report why rather than adding a second unfiltered search path.
-
-**4.4 — Migrate or re-ingest existing embeddings**
-- File: `scripts/migrate_to_qdrant.py` (new file)
-- Decide migration strategy by inspecting current data volume: if fewer than ~10,000 chunks exist in the current Milvus instance, re-embed from source documents in `data/documents/` rather than writing Milvus-export tooling. If volume is larger, export Milvus vectors directly and re-insert with the new payload schema.
-- Every re-ingested/migrated point must be tagged with `org_id = default_org` to match Phase 2's backfill.
+**4.4 — Re-ingest existing documents with org_id tagging**
+- File: `scripts/migrate_to_pinecone.py` (new file)
+- Per the decision already made: **clean re-ingest, not in-place tagging.**
+  Re-run ingestion from source documents in `data/documents/` (the same
+  source `ingest_documents()` already reads from) through the rewritten
+  `VectorStore`, writing into the appropriate org's Pinecone namespace.
+  Do not attempt to read/migrate/export anything from the old Qdrant
+  collection — it is discarded, not converted.
+- Every re-ingested point must be tagged with `org_id = default_org`,
+  matching the convention already established in Phase 2's SQL backfill
+  (`organizations` row named `default_org`) — there is no existing
+  multi-org real document set to preserve, so this is the only tagging
+  decision needed.
+- Idempotency requirement, consistent with the original plan's pattern for
+  migration scripts: running this script twice must not create duplicate
+  points. Use deterministic point IDs (the existing `hashlib.md5(...)`
+  chunk-id scheme already does this) so a re-run safely upserts rather than
+  duplicates.
+- Once this script has been run successfully and 4.6's tests pass, the old
+  Qdrant collection/instance may be decommissioned (manual step, outside
+  codebase — not a task this script needs to automate).
 
 **4.5 — Object storage migration**
-- File: `app/document/storage.py` (new or modify existing local-filesystem storage module)
-- Replace local filesystem reads/writes with an S3-compatible client (`boto3`, pointed at AWS S3, Cloudflare R2, or local MinIO via `docker-compose.yml` for dev).
-- Key format: `{org_id}/{data_source_id}/{filename}`. No document may be written without an `org_id` prefix — same "no default value" principle as 4.3.
+- File: `app/document/storage.py` (new, or modify existing local-filesystem
+  storage module — locate the actual current module before creating a new
+  one; not yet confirmed present in discovery, check before assuming it
+  doesn't exist)
+- Unchanged from the original plan: replace local filesystem reads/writes
+  with an S3-compatible client (`boto3`, pointed at AWS S3, Cloudflare R2,
+  or local MinIO via `docker-compose.yml` for dev — this part of local dev
+  is unaffected by the Pinecone decision, since object storage and vector
+  storage are independent).
+- Key format: `{org_id}/{data_source_id}/{filename}`. No document may be
+  written without an `org_id` prefix — same "no default value" principle
+  as 4.2/4.3.
 
 **4.6 — Cross-tenant adversarial test suite**
-- File: `tests/test_tenant_isolation.py` (extend the file created in Phase 2)
+- File: `tests/test_tenant_isolation.py` (extend the file from Phase 2/3)
 - Add:
 
 ```python
 def test_vector_search_never_leaks_across_orgs(org_a_ctx, org_b_ctx):
     seed_document(org_a_ctx.org_id, "Q4 budget memo")
     seed_document(org_b_ctx.org_id, "Q4 budget memo")
-    results = search(collection="documents", query_vector=embed("Q4 budget"), org_id=org_a_ctx.org_id)
-    assert all(r.payload["org_id"] == org_a_ctx.org_id for r in results)
+    results = vector_store.search(
+        query="Q4 budget",
+        allowed_sources=[...],
+        org_id=org_a_ctx.org_id,
+    )
+    assert all(r.org_id == org_a_ctx.org_id for r in results)
+    # Namespace isolation should make this structurally true, not just
+    # filter-true — assert zero cross-namespace results, not zero
+    # incorrectly-tagged results.
+
+def test_search_requires_org_id():
+    with pytest.raises(TypeError):
+        vector_store.search(query="test", allowed_sources=[...])
 
 def test_storage_keys_are_org_prefixed(org_a_ctx):
     uri = store_document(org_a_ctx.org_id, "data_source_1", "file.pdf", b"...")
     assert uri.startswith(f"{org_a_ctx.org_id}/")
 ```
 
+- `VectorResult` (the existing dataclass) gains an `org_id` field so the
+  isolation test above can assert on it directly rather than inferring
+  isolation only from absence of cross-org content.
+
 ### Verification
 
 ```bash
 pytest tests/test_tenant_isolation.py -v
-grep -r "milvus" app/ --include="*.py" ; test $? -ne 0   # only after 4.4 migration confirmed complete
-grep -rn "client.search(" app/ --include="*.py" | grep -v "app/retrieval/vector_store.py" ; test $? -ne 0
+grep -rn "qdrant\|QdrantClient" app/ --include="*.py" ; test $? -ne 0
+grep -rn "milvus" app/ --include="*.py" ; test $? -ne 0
+grep -rn "\.query(" app/ --include="*.py" | grep -v "app/retrieval/vector_store.py" ; test $? -ne 0
 ```
 
-**Phase 4 is complete only if all isolation tests pass, no `milvus` references remain in `app/`, and no direct `client.search(` calls exist outside `vector_store.py`.**
+**Phase 4 is complete only if all isolation tests pass, no `qdrant`/`QdrantClient`
+references remain in `app/` (confirming the vendor swap is fully done, not
+partially), no `milvus` references remain (confirming the original dead-code
+mention was cleaned up too, not just left as a stale comment), and no direct
+Pinecone query calls exist outside `vector_store.py`.**
 
 ---
 
@@ -508,7 +634,7 @@ status: not_started
 - File: `app/api/org.py` (new file, or extend org management module if one exists from Phase 1/2)
 - Add `DELETE /api/v1/org/{org_id}`, `org_admin`-only, requiring an explicit confirmation token in the request body (e.g. `{"confirm": "DELETE-<org_id>"}`) to prevent accidental calls.
 - Deletion order (must be exact — deleting Postgres rows first and failing partway through Qdrant/S3 cleanup would leave orphaned vector/storage data with no way to find it again):
-  1. Delete all Qdrant points where `org_id` matches (via the `vector_store.py` filter, not a direct client call).
+  1. Delete all vector points/records where `org_id` matches (via the `vector_store.py` namespace/filter interface from Phase 4, not a direct client call).
   2. Delete all S3 objects under the `{org_id}/` prefix.
   3. Delete all Postgres rows for that `org_id` (RLS-scoped delete, relying on the cascading FKs defined in Phase 2's schema).
 
@@ -529,7 +655,7 @@ pytest tests/test_compliance.py::test_delete_org_leaves_zero_residue -v
 pytest tests/test_metrics.py -v
 ```
 
-**Phase 6 is complete only if all three test commands pass, with `test_delete_org_leaves_zero_residue` specifically verifying zero remaining rows/points/objects across Postgres, Qdrant, and S3 after deletion.**
+**Phase 6 is complete only if all three test commands pass, with `test_delete_org_leaves_zero_residue` specifically verifying zero remaining rows/points/objects across Postgres, Pinecone, and S3 after deletion.**
 
 ---
 
@@ -537,7 +663,7 @@ pytest tests/test_metrics.py -v
 
 ```bash
 # No legacy code paths should remain
-grep -r "sqlite3\|milvus" app/ --include="*.py" ; test $? -ne 0
+grep -r "sqlite3\|qdrant\|milvus" app/ --include="*.py" ; test $? -ne 0
 
 # Full test suite, all phases
 pytest tests/ -v

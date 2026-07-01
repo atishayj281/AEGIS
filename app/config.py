@@ -11,12 +11,13 @@ class Settings(BaseSettings):
     app_name: str = "Enterprise RAG Intelligence Platform"
     debug: bool = True
     data_dir: Path = Path("./data")
-    milvus_db_path: Path = Path("./data/milvus.db")
+    # milvus_db_path removed (Phase 4 — Milvus fully replaced by Pinecone)
     sqlite_path: Path = Path("./data/enterprise.db")
     audit_log_path: Path = Path("./data/audit.log")
 
-    qdrant_url: str = "https://e3373a68-cdad-4410-88c3-488c5f5d87a5.us-west-1-0.aws.cloud.qdrant.io:6333"
-    qdrant_api_key: str = os.getenv("QDRANT_API_KEY")
+    # Phase 4: Pinecone vector store
+    pinecone_api_key: str = os.getenv("PINECONE_API_KEY", "")
+    pinecone_index_name: str = os.getenv("PINECONE_INDEX_NAME", "aegis-documents")
 
     nvidia_api_key: str = os.getenv("NVIDIA_API_KEY")
 

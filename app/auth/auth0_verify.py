@@ -68,8 +68,15 @@ async def get_current_context(authorization: str = Header(...)) -> dict:
     try:
         return verify_token(token)
     except jwt.PyJWTError as e:
+        # Phase 3 made get_db (and therefore this dependency) a prerequisite
+        # for get_current_user on every route. Before that, a forged/expired
+        # token could only fail inside get_current_user's own try/except,
+        # which wraps the message as "Invalid or expired token: ...". Now
+        # verification fails here first, so this needs the same wrapper —
+        # otherwise the 401 detail format depends on which dependency in
+        # the chain happens to run first, not on what actually went wrong.
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=str(e),
+            detail=f"Invalid or expired token: {str(e)}",
             headers={"WWW-Authenticate": "Bearer"},
         ) from e

@@ -28,6 +28,8 @@ async def db_session():
                 {"org_id": ORG_ACME}
             )
             yield session
+    from app.db.session import get_engine
+    await get_engine().dispose()
 
 
 @pytest.mark.asyncio
