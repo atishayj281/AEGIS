@@ -6,12 +6,12 @@ A secure, multi-tenant Retrieval-Augmented Generation (RAG) platform for queryin
 
 ## Features
 
-- **Strict Tenant Isolation** — Fully enforced at the database layer using Postgres Row-Level Security (RLS) policies keyed by Organization ID (`org_id`).
+- **Strict Tenant Isolation** — Fully enforced at the relational database layer using Postgres Row-Level Security (RLS) policies, and at the vector layer using Pinecone namespaces (one namespace per `org_id`).
 - **Auth0-Integrated JWT Verification** — Decentralized token verification using JWKS. Extracts tenant context (`org_id`, `team_ids`, and `roles`) directly from custom JWT claims.
 - **Scoped RBAC Engine** — Granular permission resolution per team. Supports team-scoped roles (`org_admin`, `team_lead`, `compliance_officer`, `finance_analyst`, `operations_engineer`, `employee`, and `guest`).
 - **Resource Grants & Expirations** — Temporary and granular data source access through a `resource_grants` table and time-bound `team_memberships` expirations.
-- **Natural Language Queries** — Context-aware questions routed across PDFs, CSVs, and JSON logs.
-- **Multi-Format Ingestion** — API-driven secure upload routes for PDF, DOCX, CSV, Excel, JSON, and Images.
+- **Natural Language Queries** — Context-aware questions routed across vector data, CSVs, and JSON logs.
+- **Multi-Format Ingestion** — API-driven secure upload routes for PDF, DOCX, CSV, Excel, JSON, and Images, storing raw files in S3-compatible Object Storage.
 - **Multi-Turn Conversations** — Thread-safe session management with sliding-window history limits and lazy TTL eviction.
 - **Security & Observability** — Inbound prompt injection defense, outbound PII/sensitive data masking, and detailed audit trails.
 
@@ -34,7 +34,7 @@ The platform integrates secure ingestion, multi-tenant isolation, and a context-
                                  |                                |
                                  v                                v
                        +-------------------+            +-------------------+
-                       |    File Router    |            |   Query Router    |
+                       |   Storage Router  |            |   Query Router    |
                        +---------+---------+            +---------+---------+
                                  |                                |
                                  v                                |
@@ -47,14 +47,14 @@ The platform integrates secure ingestion, multi-tenant isolation, and a context-
           |                      |                      |         |
           v                      v                      v         v
   +---------------+      +---------------+      +---------------+ |
-  |  Data Folders |      |  Data Folders |      |  Data Folders | |
-  |  (/documents) |      |     (/csv)    |      |    (/json)    | |
+  | Object Store  |      |  Data Folders |      |  Data Folders | |
+  | (S3 / Local)  |      |     (/csv)    |      |    (/json)    | |
   +-------+-------+      +-------+-------+      +-------+-------+ |
           |                      |                      |         |
           v                      v                      v         |
   +-------+-------+      +-------+-------+      +-------+-------+ |
   | Vector Store  |      |   Postgres    |      |   JSON Logs   | |
-  | (Qdrant)      |      |   (With RLS)  |      | (Audit/Log)   | |
+  | (Pinecone)    |      |   (With RLS)  |      | (Audit/Log)   | |
   +--+---------+--+      +-------+-------+      +-------+-------+ |
      ^         |                 |                      |         |
      |         +--------+        |        +-------------+         |
@@ -82,7 +82,8 @@ The platform integrates secure ingestion, multi-tenant isolation, and a context-
 ### Prerequisites
 
 - Python 3.10+
-- Docker & Docker Compose (for Postgres and Qdrant)
+- Docker & Docker Compose (for Postgres)
+- Pinecone Account & Index (Serverless, dimension 4096 for `nvidia/nv-embed-v1`)
 
 ### Installation
 
@@ -94,7 +95,7 @@ The platform integrates secure ingestion, multi-tenant isolation, and a context-
    pip install -r requirements.txt
    ```
 
-2. Start the local database and vector store:
+2. Start the local Postgres database:
    ```bash
    docker-compose up -d
    ```
