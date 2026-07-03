@@ -12,7 +12,9 @@ A secure, multi-tenant Retrieval-Augmented Generation (RAG) platform for queryin
 - **Resource Grants & Expirations** — Temporary and granular data source access through a `resource_grants` table and time-bound `team_memberships` expirations.
 - **Natural Language Queries** — Context-aware questions routed across vector data, CSVs, and JSON logs.
 - **Multi-Format Ingestion** — API-driven secure upload routes for PDF, DOCX, CSV, Excel, JSON, and Images, storing raw files in S3-compatible Object Storage.
-- **Multi-Turn Conversations** — Thread-safe session management with sliding-window history limits and lazy TTL eviction.
+- **Multi-Turn Conversations** — Redis-backed, highly-available session management with sliding-window history limits and native TTL eviction.
+- **Asynchronous Ingestion** — Celery background workers backed by Redis queue for non-blocking document ingestion and semantic chunking.
+- **High Availability & Scalability** — Containerized architecture using Nginx as a reverse proxy for load balancing across multiple API replicas.
 - **Security & Observability** — Inbound prompt injection defense, outbound PII/sensitive data masking, and detailed audit trails.
 
 ---
@@ -82,7 +84,7 @@ The platform integrates secure ingestion, multi-tenant isolation, and a context-
 ### Prerequisites
 
 - Python 3.10+
-- Docker & Docker Compose (for Postgres)
+- Docker & Docker Compose (for Postgres, Redis, API replicas, Celery, and Nginx)
 - Pinecone Account & Index (Serverless, dimension 4096 for `nvidia/nv-embed-v1`)
 
 ### Installation
@@ -110,12 +112,12 @@ The platform integrates secure ingestion, multi-tenant isolation, and a context-
    python scripts/seed_team_memberships.py
    ```
 
-5. Run the API Server:
+5. Run the full platform (API replicas, Celery, Nginx, Redis, Postgres):
    ```bash
-   uvicorn main:app --reload --host 0.0.0.0 --port 8000
+   docker-compose up --build -d
    ```
 
-Open API documentation at [http://localhost:8000/docs](http://localhost:8000/docs).
+Open API documentation at [http://localhost/docs](http://localhost/docs). Note that Nginx runs on port 80 and load-balances the API.
 
 ### Running Tests
 
@@ -217,11 +219,12 @@ enterprise-rag-platform/
 │   ├── intent/         # Intent classification
 │   ├── routing/        # Data source routing
 │   ├── retrieval/      # Vector, SQL, CSV, JSON retrievers
-│   ├── conversation/   # Thread-safe session & history store
+│   ├── conversation/   # Redis-backed session & history store
 │   ├── document/       # Document upload and multi-format parsers
 │   ├── generation/     # Grounded response generation
 │   ├── observability/  # Audit logging
 │   ├── api/            # FastAPI routes
+│   ├── tasks/          # Celery background workers for asynchronous ingestion
 │   └── pipeline.py     # Main orchestrator
 ├── data/               # Sample enterprise datasets
 ├── scripts/            # Database seeding & ingestion scripts
