@@ -31,7 +31,7 @@ class Settings(BaseSettings):
     # (see alembic/env.py) since autogenerate/DDL is more reliable on a sync engine.
     database_url: str = os.getenv(
         "DATABASE_URL",
-        "postgresql+asyncpg://aegis:aegis_dev_password@localhost:5432/aegis",
+        "postgresql+asyncpg://aegis:1234@localhost:5432/aegis",
     )
 
     openai_api_key: str | None = None

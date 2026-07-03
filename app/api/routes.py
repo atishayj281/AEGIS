@@ -62,7 +62,7 @@ async def list_sessions(
     user: User = Depends(get_current_user),
     manager: ConversationManager = Depends(get_conversation_manager_dep),
 ):
-    return manager.list_user_sessions(user.username)
+    return await manager.list_user_sessions(user.username)
 
 
 @router.get("/conversation/sessions/{session_id}", response_model=SessionInfoResponse)
@@ -71,7 +71,7 @@ async def get_session(
     user: User = Depends(get_current_user),
     manager: ConversationManager = Depends(get_conversation_manager_dep),
 ):
-    session = manager.get_session_info(session_id)
+    session = await manager.get_session_info(session_id)
     if not session:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -109,7 +109,7 @@ async def delete_session(
     user: User = Depends(get_current_user),
     manager: ConversationManager = Depends(get_conversation_manager_dep),
 ):
-    session = manager.get_session_info(session_id)
+    session = await manager.get_session_info(session_id)
     if not session:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -122,7 +122,7 @@ async def delete_session(
             detail="Access Denied: You do not own this conversation session.",
         )
     
-    deleted = manager.delete_session(session_id)
+    deleted = await manager.delete_session(session_id)
     if not deleted:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -216,33 +216,15 @@ async def upload_document(
             detail=f"Failed to save file: {str(e)}",
         )
 
-    # Parse and index contents
+    # Enqueue background ingestion
     try:
-        chunks = []
-        if ext in [".txt", ".md", ".log"]:
-            text = DocumentParser.parse_txt(file_bytes)
-            chunks = vector_store._semantic_chunk_text(text)
-        elif ext == ".pdf":
-            text = DocumentParser.parse_pdf(file_bytes)
-            chunks = vector_store._semantic_chunk_text(text)
-        elif ext == ".docx":
-            text = DocumentParser.parse_docx(file_bytes)
-            chunks = vector_store._semantic_chunk_text(text)
-        elif ext == ".csv":
-            chunks = DocumentParser.parse_csv(file_bytes)
-        elif ext in [".xlsx", ".xls"]:
-            chunks = DocumentParser._semantic_chunk_text(file_bytes)
-        elif ext == ".json":
-            chunks = DocumentParser.parse_json(file_bytes)
-        elif ext in [".png", ".jpg", ".jpeg"]:
-            text = DocumentParser.parse_image(file_bytes, filename)
-            chunks = vector_store._semantic_chunk_text(text)
-
-        chunks_ingested = vector_store.ingest_chunks(user.org_id, chunks, filename, data_source)
+        from app.tasks.ingestion import process_document
+        job = process_document.delay(user.org_id, data_source.value, filename, ext, file_bytes)
+        job_id = job.id
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to parse or ingest file: {str(e)}",
+            detail=f"Failed to enqueue ingestion task: {str(e)}",
         )
 
     # Save the mapping to registry
@@ -265,8 +247,9 @@ async def upload_document(
     return UploadResponse(
         filename=filename,
         data_source=data_source,
-        chunks_ingested=chunks_ingested,
-        message=f"File successfully uploaded and parsed into {chunks_ingested} search chunks.",
+        job_id=job_id,
+        status="processing",
+        message="File successfully uploaded and queued for processing.",
     )
 
 

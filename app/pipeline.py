@@ -66,8 +66,8 @@ class RAGPipeline:
             effective_role = next(iter(user.roles.values()), "employee")
 
         # Retrieve conversation context
-        session = self.conversation_manager.get_or_create_session(session_id, user.username)
-        history = self.conversation_manager.get_history(session.session_id)
+        session = await self.conversation_manager.get_or_create_session(session_id, user.username)
+        history = await self.conversation_manager.get_history(session.session_id)
         conversation_turn = (len(session.turns) // 2) + 1
 
         # Step 1: Prompt injection check
@@ -183,8 +183,8 @@ class RAGPipeline:
             citation.excerpt = citation_masked.text
 
         # Record this turn in the session history (safe, masked version)
-        self.conversation_manager.add_turn(session.session_id, "user", query)
-        self.conversation_manager.add_turn(session.session_id, "assistant", masked.text)
+        await self.conversation_manager.add_turn(session.session_id, "user", query)
+        await self.conversation_manager.add_turn(session.session_id, "assistant", masked.text)
 
         elapsed_ms = round((time.perf_counter() - start) * 1000, 2)
 
