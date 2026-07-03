@@ -134,5 +134,6 @@ class SessionInfoResponse(BaseModel):
 class UploadResponse(BaseModel):
     filename: str
     data_source: DataSource
-    chunks_ingested: int
+    job_id: str | None = None
+    status: str = "processing"
     message: str
