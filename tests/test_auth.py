@@ -7,15 +7,37 @@ to simulate tokens that the frontend would obtain from Auth0, asserting that:
   - Role mapping from the custom claims works correctly.
   - An invalid / expired token returns 401.
   - A missing Authorization header returns 401 / 403.
+
+Infrastructure mocking
+-----------------------
+The /api/v1/conversation/sessions endpoint depends on:
+  1. get_db  → tenant_scoped_session (Postgres) — overridden with a mock session
+  2. get_current_user → queries users table via get_db — get_db override covers this
+  3. get_conversation_manager_dep → Redis — overridden with an in-memory mock manager
 """
 
 import pytest
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 from fastapi import status
 from fastapi.testclient import TestClient
 from main import app
+from app.api.deps import get_db, get_conversation_manager_dep
 
-client = TestClient(app)
+# ---------------------------------------------------------------------------
+# In-memory ConversationManager stub (no Redis)
+# ---------------------------------------------------------------------------
+
+class _FakeManager:
+    """Minimal in-memory ConversationManager stub that satisfies the routes."""
+
+    async def list_user_sessions(self, username: str) -> list[dict]:
+        return []
+
+    async def get_session_info(self, session_id: str):
+        return None
+
+    async def delete_session(self, session_id: str) -> bool:
+        return False
 
 
 # ---------------------------------------------------------------------------
@@ -35,6 +57,15 @@ def _make_auth0_payload(
         "https://aegis-api/team_ids": team_ids or [],
         "https://aegis-api/roles": roles or {},
     }
+
+
+def _make_mock_db() -> AsyncMock:
+    """Return a mock AsyncSession that returns no db_id for the user lookup."""
+    db = AsyncMock()
+    result = MagicMock()
+    result.fetchone.return_value = None  # no Postgres user row needed for auth tests
+    db.execute = AsyncMock(return_value=result)
+    return db
 
 
 # ---------------------------------------------------------------------------
@@ -93,15 +124,24 @@ def mock_jwks():
 
 def test_valid_token_grants_access(mock_jwks):
     """A properly signed Auth0 token must reach a protected endpoint."""
-    response = client.get(
-        "/api/v1/conversation/sessions",
-        headers={"Authorization": "Bearer valid_admin_token"},
-    )
-    assert response.status_code == status.HTTP_200_OK
+    mock_db = _make_mock_db()
+    app.dependency_overrides[get_db] = lambda: mock_db
+    app.dependency_overrides[get_conversation_manager_dep] = lambda: _FakeManager()
+    try:
+        client = TestClient(app)
+        response = client.get(
+            "/api/v1/conversation/sessions",
+            headers={"Authorization": "Bearer valid_admin_token"},
+        )
+        assert response.status_code == status.HTTP_200_OK
+    finally:
+        app.dependency_overrides.pop(get_db, None)
+        app.dependency_overrides.pop(get_conversation_manager_dep, None)
 
 
 def test_invalid_token_returns_401(mock_jwks):
     """A tampered / expired token must return 401, not 500."""
+    client = TestClient(app)
     response = client.get(
         "/api/v1/conversation/sessions",
         headers={"Authorization": "Bearer forged_or_expired_token"},
@@ -113,6 +153,7 @@ def test_invalid_token_returns_401(mock_jwks):
 
 def test_missing_auth_header_rejected():
     """No Authorization header → 401 or 403 (HTTPBearer behaviour)."""
+    client = TestClient(app)
     response = client.get("/api/v1/conversation/sessions")
     assert response.status_code in (
         status.HTTP_401_UNAUTHORIZED,
@@ -122,6 +163,7 @@ def test_missing_auth_header_rejected():
 
 def test_malformed_bearer_rejected(mock_jwks):
     """A non-Bearer scheme must not reach the verification layer."""
+    client = TestClient(app)
     response = client.get(
         "/api/v1/conversation/sessions",
         headers={"Authorization": "Basic dXNlcjpwYXNz"},
@@ -132,15 +174,13 @@ def test_malformed_bearer_rejected(mock_jwks):
     )
 
 
-
-
-
 # ---------------------------------------------------------------------------
 # Tests: removed endpoints return 404
 # ---------------------------------------------------------------------------
 
 def test_login_endpoint_removed():
     """/auth/token must no longer exist — backend doesn't issue tokens."""
+    client = TestClient(app)
     response = client.post(
         "/api/v1/auth/token",
         json={"username": "admin", "password": "secret"},
@@ -150,12 +190,14 @@ def test_login_endpoint_removed():
 
 def test_demo_users_endpoint_removed():
     """/auth/demo-users must no longer exist."""
+    client = TestClient(app)
     response = client.get("/api/v1/auth/demo-users")
     assert response.status_code == status.HTTP_404_NOT_FOUND
 
 
 def test_internal_org_membership_endpoint_removed():
     """/internal/org-membership must no longer exist."""
+    client = TestClient(app)
     response = client.get(
         "/internal/org-membership/auth0|user1",
         headers={"X-Internal-Secret": "any-secret"},
@@ -169,16 +211,24 @@ def test_internal_org_membership_endpoint_removed():
 
 def test_distinct_users_produce_independent_sessions(mock_jwks):
     """Two users with different tokens must get separate (empty) session lists."""
-    r1 = client.get(
-        "/api/v1/conversation/sessions",
-        headers={"Authorization": "Bearer valid_admin_token"},
-    )
-    r2 = client.get(
-        "/api/v1/conversation/sessions",
-        headers={"Authorization": "Bearer valid_employee_token"},
-    )
-    assert r1.status_code == status.HTTP_200_OK
-    assert r2.status_code == status.HTTP_200_OK
-    # Both users have no sessions yet — lists should be empty
-    assert r1.json() == []
-    assert r2.json() == []
+    mock_db = _make_mock_db()
+    app.dependency_overrides[get_db] = lambda: mock_db
+    app.dependency_overrides[get_conversation_manager_dep] = lambda: _FakeManager()
+    try:
+        client = TestClient(app)
+        r1 = client.get(
+            "/api/v1/conversation/sessions",
+            headers={"Authorization": "Bearer valid_admin_token"},
+        )
+        r2 = client.get(
+            "/api/v1/conversation/sessions",
+            headers={"Authorization": "Bearer valid_employee_token"},
+        )
+        assert r1.status_code == status.HTTP_200_OK
+        assert r2.status_code == status.HTTP_200_OK
+        # Both users have no sessions yet — lists should be empty
+        assert r1.json() == []
+        assert r2.json() == []
+    finally:
+        app.dependency_overrides.pop(get_db, None)
+        app.dependency_overrides.pop(get_conversation_manager_dep, None)

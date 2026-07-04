@@ -26,6 +26,13 @@ class Settings(BaseSettings):
     auth0_domain: str = os.getenv("AUTH0_DOMAIN", "your-tenant.auth0.com")
     auth0_audience: str = os.getenv("AUTH0_AUDIENCE", "https://your-api-audience")
 
+    # Auth0 Management API — infoDba M2M application (admin user provisioning only).
+    # Required scopes on the infoDba app:
+    #   create:users, update:users, delete:users, create:organization_members
+    # Never hardcoded; never logged; raise RuntimeError at call time if absent.
+    auth0_m2m_client_id: str = os.getenv("AUTH0_M2M_CLIENT_ID", "")
+    auth0_m2m_client_secret: str = os.getenv("AUTH0_M2M_CLIENT_SECRET", "")
+
     # Postgres — multi-tenant relational store (Phase 2). asyncpg driver for the
     # app's async engine; Alembic swaps this to a sync driver at migration time
     # (see alembic/env.py) since autogenerate/DDL is more reliable on a sync engine.
