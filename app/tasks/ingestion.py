@@ -1,13 +1,10 @@
-"""Celery tasks for background processing."""
+"""Celery tasks for background document ingestion."""
 
-import os
-from celery import Celery
+from app.tasks.celery_app import celery_app
 from app.document.parser import DocumentParser
 from app.retrieval.vector_store import get_vector_store
 from app.models.domain import DataSource
 
-redis_url = os.environ.get("REDIS_URL", "redis://redis:6379/0")
-celery_app = Celery("ingestion", broker=redis_url, backend=redis_url)
 
 @celery_app.task(name="app.tasks.ingestion.process_document")
 def process_document(org_id: str, data_source_val: str, filename: str, ext: str, file_bytes: bytes):

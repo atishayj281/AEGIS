@@ -26,6 +26,13 @@ class Settings(BaseSettings):
     auth0_domain: str = os.getenv("AUTH0_DOMAIN", "your-tenant.auth0.com")
     auth0_audience: str = os.getenv("AUTH0_AUDIENCE", "https://your-api-audience")
 
+    # Auth0 Management API — infoDba M2M application (admin user provisioning only).
+    # Required scopes on the infoDba app:
+    #   create:users, update:users, delete:users, create:organization_members
+    # Never hardcoded; never logged; raise RuntimeError at call time if absent.
+    auth0_m2m_client_id: str = os.getenv("AUTH0_M2M_CLIENT_ID", "")
+    auth0_m2m_client_secret: str = os.getenv("AUTH0_M2M_CLIENT_SECRET", "")
+
     # Postgres — multi-tenant relational store (Phase 2). asyncpg driver for the
     # app's async engine; Alembic swaps this to a sync driver at migration time
     # (see alembic/env.py) since autogenerate/DDL is more reliable on a sync engine.
@@ -44,6 +51,10 @@ class Settings(BaseSettings):
     # Conversation history settings
     conversation_max_turns: int = 20
     conversation_session_ttl_minutes: int = 60
+
+    # Phase 6: Rate limiting — max query requests per user per minute
+    rate_limit_requests_per_minute: int = 60
+
 
 
 @lru_cache

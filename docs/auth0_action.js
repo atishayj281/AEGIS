@@ -1,59 +1,69 @@
 /**
- * Auth0 Post-Login Action for injecting custom organization, team, and role claims.
- * 
+ * Auth0 Post-Login Action — inject org / team / role claims from app_metadata.
+ *
+ * CURRENT MECHANISM (as of Phase 1 rev, 2026-06-xx)
+ * --------------------------------------------------
+ * This Action reads the user's `app_metadata` directly from the Auth0 event
+ * object. It does NOT call back to the AEGIS backend — the
+ * `/internal/org-membership` endpoint previously referenced here was removed
+ * in Phase 1 (see app/api/internal.py for the removal note).
+ *
+ * app_metadata is populated in two ways:
+ *   1. Admin provisioning (POST /admin/users): the AEGIS backend sets
+ *      app_metadata via the infoDba M2M application when a new user is
+ *      created. This ensures the JWT carries correct claims on the user's
+ *      very first login.
+ *   2. Role/team changes: the AEGIS backend calls
+ *      PATCH /api/v2/users/{id} (update:users scope on infoDba) whenever a
+ *      user's team or role assignment changes. The updated claims take effect
+ *      at the user's next login (after their current token expires).
+ *
+ * Expected app_metadata shape (set by the AEGIS provisioning backend):
+ *   {
+ *     "org_id":   "<postgres-org-uuid>",                 // string
+ *     "team_ids": ["<postgres-team-uuid>", ...],          // string[]
+ *     "roles":    { "<team-id>": "<role-name>", ... }     // dict[str, str]
+ *   }
+ *
+ * JWT claim namespace: "https://aegis-api"
+ * Verified by:         app/auth/auth0_verify.py (CLAIMS_NAMESPACE constant)
+ *
  * In Auth0 Dashboard:
- * 1. Create a Custom Action in the Post-Login flow.
- * 2. Add dependencies: `axios`
- * 3. Set secrets:
- *    - `INTERNAL_SECRET`: The same secret key set in the backend env.
- *    - `BACKEND_INTERNAL_URL`: The accessible URL of the enterprise-rag-platform.
- * 
- * @param {Event} event - Details about the user logging in.
- * @param {PostLoginAPI} api - Interface to mutate tokens and control access.
+ *   1. Navigate to Actions → Library → Custom Actions → Post-Login.
+ *   2. Paste this file's content. No npm dependencies required.
+ *   3. No secrets are needed (this Action is self-contained).
+ *   4. Deploy to the Login Flow.
+ *
+ * @param {Event}        event  - Auth0 login event (contains user + metadata).
+ * @param {PostLoginAPI} api    - API to mutate tokens and control access.
  */
 exports.onExecutePostLogin = async (event, api) => {
-  const axios = require('axios');
-  const userId = event.user.user_id;
-  const internalSecret = event.secrets.INTERNAL_SECRET;
-  const backendUrl = event.secrets.BACKEND_INTERNAL_URL;
+  const meta = event.user.app_metadata || {};
+  const namespace = "https://aegis-api";
 
-  if (!internalSecret || !backendUrl) {
-    console.error("Configuration error: INTERNAL_SECRET or BACKEND_INTERNAL_URL not set.");
-    return api.access.deny("Authentication system configuration error.");
-  }
-
-  try {
-    const response = await axios.get(
-      `${backendUrl}/internal/org-membership/${encodeURIComponent(userId)}`,
-      {
-        headers: {
-          "X-Internal-Secret": internalSecret
-        },
-        timeout: 3000 // 3 seconds timeout limit
-      }
+  // Deny access if the user has no org assignment.
+  // This prevents users created outside the AEGIS provisioning flow (e.g.,
+  // social-login users who were never provisioned) from obtaining a token
+  // with the AEGIS audience — they'd have no Postgres row and would fail
+  // every resolve_access check anyway, but denying here gives a clear error.
+  if (!meta.org_id) {
+    console.error(
+      `User ${event.user.user_id} has no org_id in app_metadata. ` +
+      "Provision the user via POST /admin/users before they can log in."
     );
-
-    const { org_id, team_ids, roles } = response.data;
-
-    if (!org_id) {
-      console.error(`User ${userId} does not have a mapped organization.`);
-      return api.access.deny("Access Denied: User is not assigned to any organization.");
-    }
-
-    const namespace = "https://yourapp.com";
-
-    // Set custom claims in Access Token
-    api.accessToken.setCustomClaim(`${namespace}/org_id`, org_id);
-    api.accessToken.setCustomClaim(`${namespace}/team_ids`, team_ids || []);
-    api.accessToken.setCustomClaim(`${namespace}/roles`, roles || {});
-
-    // Set custom claims in ID Token
-    api.idToken.setCustomClaim(`${namespace}/org_id`, org_id);
-    api.idToken.setCustomClaim(`${namespace}/team_ids`, team_ids || []);
-    api.idToken.setCustomClaim(`${namespace}/roles`, roles || {});
-
-  } catch (error) {
-    console.error("Failed to lookup organization membership:", error.message);
-    return api.access.deny("Authentication service temporarily unavailable.");
+    return api.access.deny(
+      "Access Denied: this account has not been provisioned for AEGIS. " +
+      "Contact your organization administrator."
+    );
   }
+
+  // Stamp custom claims into the Access Token (read by the backend on every request).
+  api.accessToken.setCustomClaim(`${namespace}/org_id`,   meta.org_id);
+  api.accessToken.setCustomClaim(`${namespace}/team_ids`, meta.team_ids || []);
+  api.accessToken.setCustomClaim(`${namespace}/roles`,    meta.roles    || {});
+
+  // Stamp the same claims into the ID Token (consumed by the frontend).
+  api.idToken.setCustomClaim(`${namespace}/org_id`,   meta.org_id);
+  api.idToken.setCustomClaim(`${namespace}/team_ids`, meta.team_ids || []);
+  api.idToken.setCustomClaim(`${namespace}/roles`,    meta.roles    || {});
 };
