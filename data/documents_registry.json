@@ -1,3 +1,12 @@
 {
-  "Unity Guide.pdf": "pdf_documents"
+  "Unity Guide.pdf": "pdf_documents",
+  "salaries.txt": "salary_records",
+  "handbook.txt": "public_policies",
+  "policy.txt": "public_policies",
+  "metrics.csv": "operational_datasets",
+  "audit.json": "audit_logs",
+  "report.pdf": "compliance_records",
+  "guide.docx": "public_policies",
+  "salaries.xlsx": "salary_records",
+  "datacenter.jpg": "infrastructure_reports"
 }

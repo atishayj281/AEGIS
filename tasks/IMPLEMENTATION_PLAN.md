@@ -1,12 +1,12 @@
 # Implementation Plan — Enterprise RAG Intelligence Platform Multi-Tenancy Migration
 
 ```yaml
-plan_version: 1.1
+plan_version: 1.2
 target_repo: enterprise-rag-platform
 migration_type: incremental
 base_branch: main
 pre_migration_tag: pre-migration-v1
-total_phases: 6
+total_phases: 7
 ```
 
 ## Instructions for the executing agent
@@ -31,6 +31,7 @@ phase_1 (auth0)
               └── phase_4 (pinecone_storage)
                     └── phase_5 (redis_scale)
                           └── phase_6 (compliance_audit)
+                                └── phase_7 (platform_superuser)
 ```
 
 No phase may run concurrently with another. Each depends strictly on the one before it.
@@ -337,7 +338,7 @@ grep -rn "UserRole.ADMIN\|rbac.can_access(" app/api/routes.py ; test $? -ne 0
 phase_id: phase_4
 branch: feature/pinecone-storage
 depends_on: [phase_3]
-status: not_started
+status: complete
 superseded_plan: qdrant_storage (see "Revision note" below)
 ```
 
@@ -552,7 +553,7 @@ Pinecone query calls exist outside `vector_store.py`.**
 phase_id: phase_5
 branch: feature/redis-scale
 depends_on: [phase_4]
-status: not_started
+status: complete
 ```
 
 ### Tasks
@@ -620,7 +621,7 @@ pytest tests/test_ingestion_queue.py::test_upload_returns_job_id_immediately -v
 phase_id: phase_6
 branch: feature/compliance-audit
 depends_on: [phase_5]
-status: not_started
+status: complete
 ```
 
 ### Tasks
@@ -659,11 +660,133 @@ pytest tests/test_metrics.py -v
 
 ---
 
-## Final repository-wide check (run after Phase 6 merges)
+## Phase 7 — Platform Superuser: Postgres BYPASSRLS Role
+
+```yaml
+phase_id: phase_7
+branch: feature/platform-superuser
+depends_on: [phase_2]
+status: not_started
+```
+
+### Rationale (one line, for context only)
+An operator account needs to see/manage every org for support, billing, and incident response. No role value inside an org-scoped table (`team_memberships.role`, `ROLE_PERMISSIONS_V2`) can grant this, because every such table — including `organizations` itself — is `FORCE ROW LEVEL SECURITY`-scoped to one `org_id` at a time. This phase adds a narrow, Postgres-enforced escape hatch rather than extending RBAC into a layer it was never designed to cross.
+
+### Discovery findings folded into this phase (pre-implementation)
+
+Repo inspection ahead of this phase found no existing platform-admin scaffolding anywhere in the codebase — worth stating explicitly so the executing agent doesn't waste a cycle re-deriving it:
+
+1. `app/auth/rbac.py`'s `ROLE_PERMISSIONS_V2` (Phase 3) is entirely org-scoped. There is no role string meaning "every org," and adding one wouldn't work regardless — RLS filters rows before `resolve_access` ever runs, per Phase 3's own design.
+2. `organizations` itself carries `FORCE ROW LEVEL SECURITY` from Phase 2's `0002_enable_rls.py`. A session with no `app.current_org_id` set cannot `SELECT` from `organizations` at all — there's a chicken-and-egg problem for any cross-org operation that a policy-level `OR` clause would require touching *every* existing Phase 2/3/4 policy to fix. A `BYPASSRLS` role avoids modifying any of that.
+3. `get_current_user`/`get_db` (Phase 1/2) never insert a `users` row implicitly — the only precedent for out-of-band row creation is a manually-run seed script (Phase 3's `scripts/seed_team_memberships.py`). This phase's bootstrap script follows that same precedent rather than adding implicit creation to request-time code.
+4. The compliance endpoints added in Phase 6 (`/api/v1/org/{org_id}/export`, `DELETE /api/v1/org/{org_id}`) are `org_admin`-scoped — an `org_admin` can only export/delete *their own* org. Nothing today lets an operator act across orgs, which is the actual gap this phase closes; Phase 7 does not modify Phase 6's endpoints, it adds a separate admin-only surface.
+
+### Tasks
+
+**7.1 — Create `aegis_platform_admin` Postgres role + `platform_admins` table**
+- File: `alembic/versions/0005_platform_admin_bypass.py` (new migration — confirm the actual latest revision id on `main` before setting `down_revision`; Phase 6 likely added its own `usage_counters` migration, so chain after whichever migration is truly last, not assumed to be `0004`)
+- Create the role idempotently (`DO $$ ... IF NOT EXISTS ... $$`) with `LOGIN BYPASSRLS` — not `SUPERUSER`, which would be a strictly wider grant than needed.
+- Grant `ALL PRIVILEGES ON ALL TABLES IN SCHEMA public` plus `ALTER DEFAULT PRIVILEGES ... GRANT ALL ON TABLES`, so tables added by Phase 6 (`usage_counters`) and any future migration are automatically visible without a follow-up grant.
+- Do **not** set a password in the migration file. Set it once, manually, via `ALTER ROLE aegis_platform_admin WITH PASSWORD '...'` outside version control.
+- Create `platform_admins(id uuid pk, auth0_sub text unique not null, email text not null, created_at timestamptz default now(), is_active boolean not null default true)`. No RLS on this table — every access path to it goes through the bypass connection anyway, so RLS here adds no isolation value and would be circular.
+- Down-migration: revoke grants, `DROP ROLE IF EXISTS aegis_platform_admin`, `DROP TABLE platform_admins`.
+
+**7.2 — Second engine + session factory for the bypass role**
+- File: `app/db/session.py` (modify existing — add alongside `engine`/`tenant_scoped_session`, do not restructure the existing tenant-scoped path)
+- Add `PLATFORM_ADMIN_DATABASE_URL` env var (same host/port/database as `DATABASE_URL`, different role/password). Add placeholder to `.env.example`.
+- Add a second `create_async_engine` bound to this URL, small pool (`pool_size=2, max_overflow=0` — this path is admin-only, low-volume) with its own `async_sessionmaker`.
+- The bypass session factory does **not** call `SET LOCAL app.current_org_id` — irrelevant for a `BYPASSRLS` connection, and setting it anyway would be misleading dead code.
+
+**7.3 — Gate dependency in `deps.py`**
+- File: `app/api/deps.py` (modify existing — add alongside `get_current_user`/`get_db`)
+- Add `get_platform_admin_db(claims: dict = Depends(get_current_context), session: AsyncSession = Depends(<7.2's bypass session dependency>))`.
+- Check the JWT's `roles` claim for a `platform_admin` value; raise `HTTPException(403, ...)` if absent, **before** the bypass session is used for anything. This must reject even a syntactically valid `platform_admin`-claimed token if no matching `platform_admins` row exists yet — the DB-level check and the claim-level check are two independent layers, not one.
+- Kept as a separate dependency, not a flag on `get_db` — mixing a rare, high-privilege path into the hot-path dependency used by every request is exactly the accidental-widening this phase exists to avoid.
+
+**7.4 — Auth0 dashboard: create operator user + grant claim**
+- Action: manual, outside codebase, same convention as Phase 1's 1.1/1.3/1.7.
+- Create a dedicated Auth0 user for the platform operator (own login, not a role grant layered onto an existing account).
+- Set `app_metadata: {"roles": ["platform_admin"]}` — confirm this merges correctly with the live Post-Login Action's existing claim shape (the checked-in `docs/auth0_action.js` may be stale relative to the dashboard; verify against the live Action, not the file).
+
+**7.5 — Bootstrap script**
+- File: `scripts/bootstrap_platform_admin.py` (new file, same idiom as `scripts/seed_team_memberships.py`)
+- Reads `PLATFORM_ADMIN_AUTH0_SUB` and `PLATFORM_ADMIN_EMAIL` from the environment.
+- Inserts into `platform_admins` via the bypass session factory, using `INSERT ... ON CONFLICT (auth0_sub) DO NOTHING` — idempotency requirement, consistent with every other bootstrap script in this plan (2.4, 4.4).
+
+**7.6 — Platform-admin routes: cross-org visibility**
+- File: `app/api/platform_admin.py` (new file)
+- Add `GET /api/v1/platform/orgs` (list every org, bypassing RLS) and `GET /api/v1/platform/orgs/{org_id}/summary` (basic health: user count, document count, last activity), both gated exclusively by `get_platform_admin_db` from 7.3.
+- Do not add write/delete operations in this task — Phase 6's `org_admin`-scoped delete/export already exists; this phase's initial surface is read-only cross-org visibility. A future phase can add cross-org write operations once the read path has proven itself in practice.
+
+**7.7 — Adversarial test suite**
+- File: `tests/test_platform_admin.py` (new file, same structural pattern as `tests/test_tenant_isolation.py`)
+- Add:
+
+```python
+def test_platform_admin_sees_all_orgs(org_a_ctx, org_b_ctx, platform_admin_ctx):
+    seed_org(org_a_ctx.org_id)
+    seed_org(org_b_ctx.org_id)
+    orgs = platform_admin_list_orgs(platform_admin_ctx)
+    assert org_a_ctx.org_id in {o.id for o in orgs}
+    assert org_b_ctx.org_id in {o.id for o in orgs}
+    # Structural check: true because BYPASSRLS makes org_id filtering
+    # inapplicable, not because every row happens to carry a matching flag.
+
+def test_non_platform_admin_claim_rejected(org_a_ctx):
+    with pytest.raises(HTTPException) as exc:
+        get_platform_admin_db(claims=org_a_ctx.claims, session=...)
+    assert exc.value.status_code == 403
+
+def test_bypass_session_never_used_outside_admin_routes():
+    # Static check: get_platform_admin_db must not appear as a Depends()
+    # anywhere under app/api/routes.py, app/api/compliance.py, or app/api/org.py.
+    ...
+
+def test_bootstrap_script_idempotent():
+    run_bootstrap_script()
+    run_bootstrap_script()
+    assert count_platform_admins_with_sub(TEST_SUB) == 1
+```
+
+- `test_non_platform_admin_claim_rejected` is a standing regression guard: it must keep passing even as future phases broaden `ROLE_PERMISSIONS_V2` — a widened org-scoped role must never accidentally satisfy this gate.
+
+### Verification
+
+```bash
+# 1. Bypass role structurally sees cross-org data
+pytest tests/test_platform_admin.py::test_platform_admin_sees_all_orgs -v
+
+# 2. Non-platform-admin tokens rejected before touching the bypass session
+pytest tests/test_platform_admin.py::test_non_platform_admin_claim_rejected -v
+
+# 3. No other route wires the bypass dependency in
+pytest tests/test_platform_admin.py::test_bypass_session_never_used_outside_admin_routes -v
+grep -rn "get_platform_admin_db" app/api/ | grep -v "app/api/deps.py" | grep -v "platform_admin.py" ; test $? -ne 0
+
+# 4. Bootstrap script is safe to re-run
+pytest tests/test_platform_admin.py::test_bootstrap_script_idempotent -v
+
+# 5. Existing tenant isolation across all layers is untouched
+pytest tests/test_tenant_isolation.py -v
+pytest tests/test_compliance.py -v
+```
+
+**Phase 7 is complete only if all five verification steps pass, with (3)'s grep confirming the bypass dependency is wired into `platform_admin.py` and nowhere else, and (5) confirming this phase made zero changes to Phase 2–6 behavior — this phase must be purely additive, not a modification of the existing tenancy or compliance model.**
+
+---
+
+## Final repository-wide check (run after Phase 7 merges)
 
 ```bash
 # No legacy code paths should remain
 grep -r "sqlite3\|qdrant\|milvus" app/ --include="*.py" ; test $? -ne 0
+
+# Bypass role/URL never referenced outside its own module
+grep -rln "aegis_platform_admin\|PLATFORM_ADMIN_DATABASE_URL" app/ \
+  | grep -v "app/db/session.py" | grep -v "app/api/deps.py" ; test $? -ne 0
+
+# No route module other than platform_admin.py imports the bypass dependency
+grep -rn "get_platform_admin_db" app/api/routes.py app/api/compliance.py app/api/org.py ; test $? -ne 0
 
 # Full test suite, all phases
 pytest tests/ -v

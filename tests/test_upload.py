@@ -25,6 +25,7 @@ import pytest
 from fastapi import status
 from fastapi.testclient import TestClient
 
+import app.tasks.ingestion
 from app.api.deps import get_db
 from app.auth.jwt_auth import User
 from app.models.domain import DataSource
@@ -73,14 +74,41 @@ def mock_jwks_upload():
 def mock_db_upload():
     """Override get_db so upload tests don't hit Postgres.
 
-    get_current_user executes `SELECT id FROM users WHERE auth0_sub = :sub`
-    through the injected db session. We return None (no db_id) which is
-    acceptable — upload RBAC checks user.roles (from JWT), not user.db_id.
+    Mocks queries for user lookup and team memberships to allow correct
+    RBAC resolution during document upload validation.
     """
     mock_db = AsyncMock()
-    result = MagicMock()
-    result.fetchone.return_value = None  # no Postgres row — db_id will be None
-    mock_db.execute = AsyncMock(return_value=result)
+
+    user_admin_id = uuid.UUID("30000000-0000-0000-0000-000000000001")
+    user_employee_id = uuid.UUID("30000000-0000-0000-0000-000000000002")
+
+    async def _execute(stmt, params=None):
+        sql = str(stmt).strip().upper()
+        result = MagicMock()
+
+        if "FROM USERS" in sql:
+            sub = params.get("sub") if params else None
+            if sub == "auth0|admin":
+                result.fetchone.return_value = (user_admin_id,)
+            elif sub == "auth0|employee":
+                result.fetchone.return_value = (user_employee_id,)
+            else:
+                result.fetchone.return_value = None
+        elif "FROM TEAM_MEMBERSHIPS" in sql:
+            user_id = params.get("user_id") if params else None
+            if user_id == user_admin_id:
+                result.fetchall.return_value = [("org_admin", None)]
+            elif user_id == user_employee_id:
+                result.fetchall.return_value = [("employee", None)]
+            else:
+                result.fetchall.return_value = []
+        else:
+            result.fetchone.return_value = None
+            result.fetchall.return_value = []
+
+        return result
+
+    mock_db.execute = AsyncMock(side_effect=_execute)
     app.dependency_overrides[get_db] = lambda: mock_db
     yield mock_db
     app.dependency_overrides.pop(get_db, None)

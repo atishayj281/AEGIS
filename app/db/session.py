@@ -32,6 +32,23 @@ is where they get enforced:
    garbled org_id should fail with a clean 400, not an unhandled 500 from
    deep inside a query. tenant_scoped_session enforces this before SET
    LOCAL ever runs.
+
+Phase 7 — Platform superuser bypass
+------------------------------------
+A second engine (`_platform_admin_engine`) connects under the
+`aegis_platform_admin` Postgres role, which carries BYPASSRLS.  It uses a
+separate connection pool (pool_size=2, max_overflow=0 — admin-only,
+low-volume) and deliberately does NOT call SET LOCAL app.current_org_id:
+
+  * Calling it anyway would be misleading dead code — BYPASSRLS means RLS
+    policies are skipped entirely for this role, so the setting is never
+    consulted.  Leaving it out makes the bypass path unambiguous.
+  * More importantly, mixing bypass logic into tenant_scoped_session (e.g.
+    via an `if bypass:` flag) would be exactly the accidental-widening this
+    phase is designed to prevent: a future maintainer adding a flag could
+    accidentally pass `bypass=True` from an org-scoped code path.
+    Two separate functions with two separate entry points make that class
+    of mistake structurally impossible rather than just convention-dependent.
 """
 
 import uuid
@@ -127,4 +144,77 @@ async def tenant_scoped_session(
                 text("SELECT set_config('app.current_org_id', :org_id, true)"),
                 {"org_id": str(validated_org_id)},
             )
+            yield session
+
+
+# ---------------------------------------------------------------------------
+# Phase 7 — Platform admin bypass engine and session factory
+# ---------------------------------------------------------------------------
+
+_platform_admin_engine: AsyncEngine | None = None
+_platform_admin_session_factory: async_sessionmaker[AsyncSession] | None = None
+
+
+def get_platform_admin_engine() -> AsyncEngine:
+    """Module-level singleton for the BYPASSRLS admin engine.
+
+    Connects under the `aegis_platform_admin` Postgres role via
+    PLATFORM_ADMIN_DATABASE_URL.  Pool is intentionally small (size=2,
+    max_overflow=0) — this path is admin-only and low-volume.
+
+    Returns None-safe: if PLATFORM_ADMIN_DATABASE_URL is not set (e.g. in
+    tests that only want to import this module), callers should guard with
+    `if get_platform_admin_engine() is None` or let the KeyError propagate
+    as a hard startup failure (correct for production).
+    """
+    global _platform_admin_engine
+    if _platform_admin_engine is None:
+        settings = get_settings()
+        url = settings.platform_admin_database_url
+        if not url:
+            raise RuntimeError(
+                "PLATFORM_ADMIN_DATABASE_URL is not set. "
+                "Set it in .env or the environment before starting the server."
+            )
+        _platform_admin_engine = create_async_engine(
+            url,
+            pool_size=2,
+            max_overflow=0,
+            pool_pre_ping=True,
+        )
+    return _platform_admin_engine
+
+
+def get_platform_admin_session_factory() -> async_sessionmaker[AsyncSession]:
+    """Session factory bound to the BYPASSRLS engine."""
+    global _platform_admin_session_factory
+    if _platform_admin_session_factory is None:
+        _platform_admin_session_factory = async_sessionmaker(
+            bind=get_platform_admin_engine(),
+            expire_on_commit=False,
+        )
+    return _platform_admin_session_factory
+
+
+@asynccontextmanager
+async def platform_admin_session() -> AsyncIterator[AsyncSession]:
+    """Yield an AsyncSession that bypasses all RLS policies.
+
+    This session connects as `aegis_platform_admin` (BYPASSRLS role) and
+    therefore sees rows across every org_id without any tenant filter.
+
+    Deliberately does NOT set app.current_org_id:
+      - BYPASSRLS means RLS policies are skipped entirely — the setting
+        would never be consulted and including it would be misleading.
+      - Omitting it also makes the bypass path structurally distinct from
+        tenant_scoped_session, preventing accidental reuse via copy-paste.
+
+    Use ONLY from get_platform_admin_db in app/api/deps.py, which gates
+    access behind both a JWT claim check and a platform_admins DB row
+    check before this context manager is entered.  No other code path
+    should call platform_admin_session() directly.
+    """
+    factory = get_platform_admin_session_factory()
+    async with factory() as session:
+        async with session.begin():
             yield session

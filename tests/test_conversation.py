@@ -287,12 +287,20 @@ def _make_mock_pipeline(manager: InMemoryConversationManager):
         await manager.add_turn(session.session_id, "assistant", f"Mock answer to: {query}")
         turn_count = await manager.get_turn_count(session.session_id)
         return {
+            "query": query,
             "answer": f"Mock answer to: {query}",
+            "intent": "general_inquiry",
+            "domain": "general",
+            "confidence": 0.9,
+            "citations": [],
+            "retrieval_trace": [],
+            "access_granted": True,
+            "masked_fields": [],
+            "query_id": str(uuid.uuid4()),
+            "response_time_ms": 10.0,
+            "timestamp": datetime.now(timezone.utc),
             "session_id": session.session_id,
             "conversation_turn": turn_count,
-            "sources": [],
-            "data_source": "public_policies",
-            "access_level": "granted",
         }
 
     pipeline.process_query = fake_process_query
