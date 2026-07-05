@@ -41,6 +41,16 @@ class Settings(BaseSettings):
         "postgresql+asyncpg://aegis:1234@localhost:5432/aegis",
     )
 
+    # Phase 7: Platform admin bypass role (aegis_platform_admin, BYPASSRLS).
+    # Same host/port/database as DATABASE_URL, different role + password.
+    # Password must be set manually via ALTER ROLE — never hardcoded.
+    # Leave blank in dev/test to get a RuntimeError if the bypass path is
+    # accidentally exercised (failing loudly is correct in that case).
+    platform_admin_database_url: str = os.getenv(
+        "PLATFORM_ADMIN_DATABASE_URL",
+        "",
+    )
+
     openai_api_key: str | None = None
     openai_model: str = "gpt-4o-mini"
 

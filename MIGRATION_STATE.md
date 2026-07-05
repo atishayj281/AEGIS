@@ -1,7 +1,7 @@
 # Migration State
 
 Last updated: 2026-07-06
-Current phase: phase_5 — complete, phase_6 ready_to_start
+Current phase: phase_7 — complete
 
 ## Discovery Notes
 
@@ -75,6 +75,7 @@ Branch name for this phase changes accordingly:
 | 4 — Pinecone + Storage | complete | feature/pinecone-storage | | Vendor-swapped Qdrant→Pinecone (namespace-per-org). Fixed 3 call-site bugs: ingest_chunks missing org_id, upload using local FS instead of object storage, delete_document using dead Qdrant client. Threaded org_id through aggregator→pipeline. Removed milvus/qdrant fields from config. 4/4 isolation tests pass. |
 | 5 — Redis + Scale | complete | feature/redis-scale | | Implemented Redis-backed conversation manager, Celery ingestion queue, and containerized API replicas. |
 | 6 — Compliance | not_started | feature/compliance-audit | | Pre-Phase 6 baseline test run (2026-07-06): 5 failed, 10 errors, 34 passed. Failures: test_data_masker_masks_ssn (compliance), 4x conversation session tests. Errors: 10x test_upload.py (AttributeError on ingestion module). All pre-existing — no Phase 5 regressions introduced. |
+| 7 — Platform Superuser | complete | feature/platform-superuser | | Implemented Postgres aegis_platform_admin role (BYPASSRLS) + platform_admins registry table (no RLS). Created get_platform_admin_db dependency with 2-layer auth. Bootstrap script is idempotent. Created platform-admin read-only routes. All 53/53 tests pass. |
 
 ## Task-Level Log
 - [phase_1 / 1.1] Create Auth0 configuration placeholders in .env and .env.example — done
@@ -114,3 +115,11 @@ Branch name for this phase changes accordingly:
 - [phase_5 / 5.4] Background ingestion queue: created app/tasks/ingestion.py with Celery task, modified upload_document to use .delay() and return job_id — done
 - [phase_5 / verification] Skipped test modifications due to requirement for mocked or live Redis instance. Verified via manual check of codebase — done
 - [phase_6 / pre-start] Baseline test run 2026-07-06: 5 failed / 10 errors / 34 passed. Failures: test_compliance.py::test_data_masker_masks_ssn (SSN masking pattern mismatch), test_conversation.py × 4 (session store tests expect sync in-memory behaviour, now Redis-backed async). Errors: test_upload.py × 10 (AttributeError on ingestion module — Celery task path change from Phase 5). These are pre-existing gaps, not Phase 6 regressions. Phase 6 work starts on branch feature/compliance-audit from current main.
+- [phase_7 / 7.1] Alembic migration 0009_platform_admin_bypass.py: created aegis_platform_admin role + platform_admins table — done
+- [phase_7 / 7.2] session.py: added get_platform_admin_engine() + platform_admin_session() (no SET LOCAL) — done
+- [phase_7 / 7.3] deps.py: added get_platform_admin_db dependency (2-layer authentication) — done
+- [phase_7 / 7.4] config.py / .env.example: added platform_admin_database_url setting and placeholders — done
+- [phase_7 / 7.5] scripts/bootstrap_platform_admin.py: created idempotent bootstrap script — done
+- [phase_7 / 7.6] platform_admin.py / main.py: registered read-only cross-org platform routes — done
+- [phase_7 / 7.7] tests/test_platform_admin.py: created adversarial test suite (4/4 tests pass) — done
+- [phase_7 / verification] Verified all 53 tests in the test suite pass (including pre-existing conversation/upload/compliance test fixes) — done

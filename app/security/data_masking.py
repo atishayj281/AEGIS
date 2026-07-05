@@ -11,7 +11,7 @@ MASKING_RULES: list[tuple[str, str]] = [
     (r"(?i)(bearer\s+)([A-Za-z0-9\-_.]+)", r"\1************"),
     (r"\b(\d{3})-(\d{2})-(\d{4})\b", r"XXX-XX-\3"),
     (r"\b(\d{3})(\d{2})(\d{4})\b", r"XXX-XX-\3"),
-    (r"(?i)(ssn\s*[=:]\s*)([^\s,;\"']+)", r"\1XXX-XX-****"),
+    (r"(?i)(ssn\s*[=:]\s*)(?![X*])([^\s,;\"']+)", r"\1XXX-XX-****"),
     (r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b", "[EMAIL_REDACTED]"),
     (r"(?i)(sk-prod-[A-Za-z0-9\-]+)", "sk-prod-************"),
     (r"(?i)(sk_live_[A-Za-z0-9]+)", "sk_live_************"),

@@ -18,7 +18,11 @@ from app.pipeline import RAGPipeline
 from app.retrieval.vector_store import VectorStore
 from app.conversation.manager import ConversationManager, get_conversation_manager
 from sqlalchemy.ext.asyncio import AsyncSession
-from app.db.session import InvalidOrgIdError, tenant_scoped_session
+from app.db.session import (
+    InvalidOrgIdError,
+    tenant_scoped_session,
+    platform_admin_session,
+)
 
 from typing import AsyncIterator
 
@@ -147,3 +151,83 @@ async def get_current_user(
         team_ids=payload.get("team_ids", []),
         roles=roles_claim,
     )
+
+
+# ---------------------------------------------------------------------------
+# Phase 7 — Platform admin bypass dependency
+# ---------------------------------------------------------------------------
+
+async def get_platform_admin_db(
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+) -> AsyncIterator[AsyncSession]:
+    """FastAPI dependency yielding a BYPASSRLS session for platform admins.
+
+    Two independent guard layers, evaluated in this order:
+
+    1. JWT claim check (cheap, no DB round-trip):
+       The token's `roles` list must contain "platform_admin".  Any token
+       that passes Auth0 RS256 verification but lacks this claim is rejected
+       with 403 before a bypass session is ever opened.  This is the first
+       line of defence and must remain unconditional — it must not be gated
+       on, or combined with, the org-scoped get_current_context path.
+
+    2. platform_admins DB row check (authoritative, revocable):
+       Even a syntactically valid "platform_admin"-claimed token is rejected
+       if no matching active row exists in the `platform_admins` table.
+       This lets operators be revoked by flipping `is_active = false`
+       without waiting for the JWT to expire.
+
+    The bypass session (platform_admin_session()) is only opened AFTER both
+    checks pass, so a rejected call never touches the BYPASSRLS connection
+    pool.
+
+    This dependency is intentionally separate from get_db / get_current_user:
+    mixing a rare, high-privilege path into the hot-path dependency used by
+    every request is exactly the accidental-widening this phase exists to
+    avoid.  Do NOT add `bypass: bool = False` to get_db as a shortcut.
+    """
+    # --- Layer 1: Verify JWT and extract claims ---
+    try:
+        payload = verify_token(credentials.credentials)
+    except jwt.PyJWTError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=f"Invalid or expired token: {exc}",
+            headers={"WWW-Authenticate": "Bearer"},
+        ) from exc
+
+    roles_list = payload.get("roles", [])
+    # roles may be a list (platform_admin claim) or a dict (team_id->role map).
+    # Handle both shapes defensively.
+    if isinstance(roles_list, dict):
+        roles_list = list(roles_list.values())
+    if "platform_admin" not in roles_list:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="platform_admin role required",
+        )
+
+    auth0_sub = payload.get("user_id") or payload.get("sub")
+
+    # --- Layer 2: Verify platform_admins DB row exists and is active ---
+    # This check uses the bypass session itself — the platform_admins table
+    # has no RLS, so this query is safe to run on either connection.
+    # We use the bypass session here for consistency (avoids needing to pass
+    # an org_id just to check a non-RLS table).
+    async with platform_admin_session() as session:
+        result = await session.execute(
+            text(
+                "SELECT id FROM platform_admins "
+                "WHERE auth0_sub = :sub AND is_active = true "
+                "LIMIT 1"
+            ),
+            {"sub": auth0_sub},
+        )
+        if result.fetchone() is None:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="No active platform_admins record found for this token",
+            )
+        # Yield the already-open bypass session to the route handler.
+        yield session
+

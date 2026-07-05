@@ -2,7 +2,7 @@
 
 from app.tasks.celery_app import celery_app
 from app.document.parser import DocumentParser
-from app.retrieval.vector_store import get_vector_store
+from app.api.deps import get_vector_store
 from app.models.domain import DataSource
 
 
