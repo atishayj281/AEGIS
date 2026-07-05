@@ -73,7 +73,7 @@ class RAGPipeline:
         # Step 1: Prompt injection check
         safe, reason = self.injection_guard.check(query)
         if not safe:
-            self.audit_logger.log(
+            await self.audit_logger.log_async(
                 AuditLogEntry(
                     query_id=query_id,
                     username=user.username,
@@ -84,7 +84,9 @@ class RAGPipeline:
                     response_time_ms=round((time.perf_counter() - start) * 1000, 2),
                     timestamp=now,
                     metadata={"reason": reason},
-                )
+                ),
+                db,
+                user.org_id,
             )
             return SecurityViolationResponse(
                 query=query,
@@ -115,7 +117,7 @@ class RAGPipeline:
             for denied_source in inferred_sources:
                 allowed = await resolve_access(ctx, denied_source.value, team_id=team_id)
                 if not allowed:
-                    self.audit_logger.log(
+                    await self.audit_logger.log_async(
                         AuditLogEntry(
                             query_id=query_id,
                             username=user.username,
@@ -127,7 +129,9 @@ class RAGPipeline:
                             response_time_ms=round((time.perf_counter() - start) * 1000, 2),
                             timestamp=now,
                             metadata={"denied_source": denied_source.value},
-                        )
+                        ),
+                        db,
+                        user.org_id,
                     )
                     return AccessDeniedResponse(
                         query=query,
@@ -144,7 +148,7 @@ class RAGPipeline:
         routed_sources = await self.query_router.route(intent_result, ctx, query, team_id=team_id)
         print(f"Route: {routed_sources}")
         if not routed_sources:
-            self.audit_logger.log(
+            await self.audit_logger.log_async(
                 AuditLogEntry(
                     query_id=query_id,
                     username=user.username,
@@ -155,7 +159,9 @@ class RAGPipeline:
                     rbac_violation=True,
                     response_time_ms=round((time.perf_counter() - start) * 1000, 2),
                     timestamp=now,
-                )
+                ),
+                db,
+                user.org_id,
             )
             return AccessDeniedResponse(
                 query=query,
@@ -188,7 +194,7 @@ class RAGPipeline:
 
         elapsed_ms = round((time.perf_counter() - start) * 1000, 2)
 
-        self.audit_logger.log(
+        await self.audit_logger.log_async(
             AuditLogEntry(
                 query_id=query_id,
                 username=user.username,
@@ -203,7 +209,9 @@ class RAGPipeline:
                     "citation_count": len(context.citations),
                     "confidence": confidence,
                 },
-            )
+            ),
+            db,
+            user.org_id,
         )
 
         return QueryResponse(

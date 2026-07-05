@@ -89,6 +89,24 @@ def get_pipeline() -> RAGPipeline:
     return _pipeline
 
 
+from app.security.rate_limiter import RateLimiter
+
+_rate_limiter: RateLimiter | None = None
+
+
+def get_rate_limiter() -> RateLimiter:
+    """Return the singleton RateLimiter, configured from Settings."""
+    global _rate_limiter
+    if _rate_limiter is None:
+        settings = get_settings()
+        _rate_limiter = RateLimiter(
+            max_requests=settings.rate_limit_requests_per_minute,
+            window_seconds=60,
+        )
+    return _rate_limiter
+
+
+
 from sqlalchemy import text
 
 async def get_current_user(

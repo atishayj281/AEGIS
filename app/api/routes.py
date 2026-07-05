@@ -12,6 +12,7 @@ from app.api.deps import (
     get_vector_store,
     get_conversation_manager_dep,
     get_db,
+    get_rate_limiter,
 )
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth.rbac import resolve_access
@@ -30,6 +31,7 @@ from app.pipeline import RAGPipeline
 from app.retrieval.vector_store import VectorStore
 from app.models.domain import DataSource
 from app.conversation.manager import ConversationManager
+from app.security.rate_limiter import RateLimiter
 
 router = APIRouter()
 
@@ -46,7 +48,25 @@ async def query(
     user: User = Depends(get_current_user),
     pipeline: RAGPipeline = Depends(get_pipeline),
     db: AsyncSession = Depends(get_db),
+    rate_limiter: RateLimiter = Depends(get_rate_limiter),
 ):
+    # Rate-limit check — must be first so we don't run any pipeline work for
+    # requests that are already over the quota.
+    allowed, count = await rate_limiter.is_allowed(
+        org_id=str(user.org_id or "unknown"),
+        username=user.username,
+    )
+    if not allowed:
+        from fastapi import Response
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=(
+                f"Rate limit exceeded: {rate_limiter.max_requests} requests per minute. "
+                "Please wait before sending another query."
+            ),
+            headers={"Retry-After": "60"},
+        )
+
     return await pipeline.process_query(
         request.query,
         user,
@@ -145,13 +165,23 @@ async def health(vector_store: VectorStore = Depends(get_vector_store)):
 
 
 @router.get("/audit/stats")
-async def audit_stats(user: User = Depends(get_current_user), pipeline: RAGPipeline = Depends(get_pipeline)):
-    return pipeline.audit_logger.get_stats()
+async def audit_stats(
+    user: User = Depends(get_current_user),
+    pipeline: RAGPipeline = Depends(get_pipeline),
+    db: AsyncSession = Depends(get_db),
+):
+    """Return aggregate audit statistics for the caller's org (Postgres-backed)."""
+    return await pipeline.audit_logger.get_stats_async(db)
 
 
 @router.get("/audit/recent")
-async def audit_recent(user: User = Depends(get_current_user), pipeline: RAGPipeline = Depends(get_pipeline)):
-    entries = pipeline.audit_logger.get_recent(20)
+async def audit_recent(
+    user: User = Depends(get_current_user),
+    pipeline: RAGPipeline = Depends(get_pipeline),
+    db: AsyncSession = Depends(get_db),
+):
+    """Return the 20 most recent audit entries for the caller's org (Postgres-backed)."""
+    entries = await pipeline.audit_logger.get_recent_async(db, limit=20)
     return {"entries": [e.model_dump() for e in entries]}
 
 
@@ -227,7 +257,7 @@ async def upload_document(
             detail=f"Failed to enqueue ingestion task: {str(e)}",
         )
 
-    # Save the mapping to registry
+    # Save the mapping to registry (flat-file — kept for backward compat)
     registry_path = settings.data_dir / "documents_registry.json"
     import json
     registry = {}
@@ -243,6 +273,33 @@ async def upload_document(
             json.dump(registry, wf, indent=2)
     except Exception:
         pass
+
+    # Record upload in Postgres for GDPR erasure targeting (task 6.2 / Phase 6).
+    # Best-effort: a DB failure here must not block the upload response.
+    try:
+        from sqlalchemy import text as _text
+        await db.execute(
+            _text(
+                """
+                INSERT INTO document_uploads
+                    (org_id, user_id, filename, data_source, storage_key)
+                VALUES (:org_id, :user_id, :filename, :data_source, :storage_key)
+                ON CONFLICT DO NOTHING
+                """
+            ),
+            {
+                "org_id": user.org_id,
+                "user_id": user.db_id,
+                "filename": filename,
+                "data_source": data_source.value,
+                "storage_key": storage_uri,
+            },
+        )
+    except Exception as _reg_exc:
+        import logging as _logging
+        _logging.getLogger(__name__).warning(
+            "upload_document: failed to record in document_uploads (%s) — proceeding.", _reg_exc
+        )
 
     return UploadResponse(
         filename=filename,

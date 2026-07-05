@@ -52,6 +52,10 @@ class Settings(BaseSettings):
     conversation_max_turns: int = 20
     conversation_session_ttl_minutes: int = 60
 
+    # Phase 6: Rate limiting — max query requests per user per minute
+    rate_limit_requests_per_minute: int = 60
+
+
 
 @lru_cache
 def get_settings() -> Settings:

@@ -512,3 +512,241 @@ async def _rollback_auth0_user(auth0_user_id: str) -> str:
             f"Auth0 rollback FAILED — manual deletion of Auth0 user "
             f"{auth0_user_id!r} required. Error: {rollback_exc}"
         )
+
+
+# ── DELETE /admin/users/{user_id}/data — GDPR right-to-erasure ───────────────
+
+
+class EraseUserDataResponse(BaseModel):
+    user_id: str
+    audit_rows_deleted: int
+    documents_erased: int
+    status: str = "erased"
+    message: str
+
+
+@admin_router.delete(
+    "/users/{user_id}/data",
+    response_model=EraseUserDataResponse,
+    summary="GDPR erasure — delete all data for a user (org_admin only)",
+)
+async def erase_user_data(
+    user_id: str,
+    caller: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> Any:
+    """Hard-delete all audit logs and documents belonging to the target user.
+
+    Fulfils GDPR Article 17 (right to erasure):
+    1. Validates org_admin role.
+    2. Deletes vectors from Pinecone and files from object storage for each
+       document uploaded by this user (tracked in ``document_uploads``).
+    3. Deletes all ``audit_logs`` rows where ``username`` matches.
+    4. Deletes all ``document_uploads`` rows for this ``user_id``.
+    """
+    from sqlalchemy import text
+
+    ctx = _make_ctx(caller, db)
+
+    if not await resolve_access(ctx, "*", team_id=None):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access Denied: only org_admin callers may erase user data.",
+        )
+
+    try:
+        uuid.UUID(user_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"user_id {user_id!r} is not a valid UUID.",
+        )
+
+    if caller.db_id and str(caller.db_id) == user_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Admins may not erase their own data. Transfer admin role first.",
+        )
+
+    # Resolve username (RLS scopes to caller's org)
+    target = (
+        await db.execute(
+            text("SELECT email FROM users WHERE id = :user_id"),
+            {"user_id": user_id},
+        )
+    ).fetchone()
+
+    if not target:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"User {user_id!r} not found in your organization.",
+        )
+
+    username: str = target[0]
+
+    # Enumerate uploaded documents for this user
+    doc_rows = (
+        await db.execute(
+            text(
+                "SELECT filename, data_source, storage_key FROM document_uploads "
+                "WHERE user_id = :user_id"
+            ),
+            {"user_id": user_id},
+        )
+    ).fetchall()
+
+    # Delete vectors and object storage per document
+    from app.retrieval.vector_store import get_vector_store
+    from app.db.storage import delete_document as object_storage_delete
+
+    vector_store = get_vector_store()
+    docs_erased = 0
+    for filename, data_source_val, _storage_key in doc_rows:
+        try:
+            vector_store.delete_by_source(caller.org_id, filename)
+        except Exception as vs_exc:
+            logger.warning("erase_user_data: vector delete failed for %s: %s", filename, vs_exc)
+        try:
+            object_storage_delete(
+                org_id=caller.org_id,
+                data_source_id=data_source_val,
+                filename=filename,
+            )
+        except Exception as obj_exc:
+            logger.warning("erase_user_data: object storage delete failed for %s: %s", filename, obj_exc)
+        docs_erased += 1
+
+    # Delete document_uploads rows
+    await db.execute(
+        text("DELETE FROM document_uploads WHERE user_id = :user_id"),
+        {"user_id": user_id},
+    )
+
+    # Delete audit_logs rows by username
+    audit_result = await db.execute(
+        text("DELETE FROM audit_logs WHERE username = :username RETURNING id"),
+        {"username": username},
+    )
+    audit_rows_deleted = len(audit_result.fetchall())
+
+    logger.info(
+        "erase_user_data: user=%s username=%s audit_rows=%d docs=%d",
+        user_id,
+        username,
+        audit_rows_deleted,
+        docs_erased,
+    )
+
+    return EraseUserDataResponse(
+        user_id=user_id,
+        audit_rows_deleted=audit_rows_deleted,
+        documents_erased=docs_erased,
+        status="erased",
+        message=(
+            f"All data for {username!r} erased: "
+            f"{audit_rows_deleted} audit entries deleted, "
+            f"{docs_erased} documents removed."
+        ),
+    )
+
+
+# ── GET /admin/compliance/export — Compliance audit export ─────────────────────
+
+
+@admin_router.get(
+    "/compliance/export",
+    summary="Export audit logs as JSON or CSV (org_admin or compliance_officer)",
+)
+async def compliance_export(
+    format: str = "json",
+    from_date: str | None = None,
+    to_date: str | None = None,
+    username: str | None = None,
+    limit: int = 1000,
+    caller: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> Any:
+    """Export structured audit evidence for compliance reporting.
+
+    Accessible to ``org_admin``, ``team_lead``, and ``compliance_officer`` roles.
+
+    Query parameters
+    ----------------
+    format     : ``json`` (default) or ``csv``.
+    from_date  : ISO-8601 string (e.g. ``2026-01-01T00:00:00Z``).
+    to_date    : ISO-8601 string.
+    username   : Filter to a specific user.
+    limit      : Max rows (default 1000, hard cap 10 000).
+    """
+    import csv
+    import io
+    from datetime import datetime
+    from fastapi.responses import StreamingResponse
+
+    ctx = _make_ctx(caller, db)
+
+    # Allow org_admin / team_lead (wildcard) or compliance_officer
+    caller_roles: set[str] = set()
+    if caller.roles:
+        caller_roles = set(caller.roles.values())
+
+    allowed_roles = {"org_admin", "team_lead", "compliance_officer"}
+    if not caller_roles.intersection(allowed_roles):
+        if not await resolve_access(ctx, "compliance_records", team_id=None):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Access Denied: only org_admin or compliance_officer may export audit logs.",
+            )
+
+    from_dt: datetime | None = None
+    to_dt: datetime | None = None
+    if from_date:
+        try:
+            from_dt = datetime.fromisoformat(from_date.replace("Z", "+00:00"))
+        except ValueError:
+            raise HTTPException(status_code=422, detail=f"Invalid from_date: {from_date!r}")
+    if to_date:
+        try:
+            to_dt = datetime.fromisoformat(to_date.replace("Z", "+00:00"))
+        except ValueError:
+            raise HTTPException(status_code=422, detail=f"Invalid to_date: {to_date!r}")
+
+    limit = min(limit, 10_000)
+
+    from app.observability.audit_logger import AuditLogger
+    audit_logger = AuditLogger()
+    entries = await audit_logger.get_recent_async(
+        db,
+        limit=limit,
+        username=username,
+        from_date=from_dt,
+        to_date=to_dt,
+    )
+
+    if format.lower() == "csv":
+        output = io.StringIO()
+        writer = csv.writer(output)
+        writer.writerow([
+            "query_id", "username", "role", "query", "intent", "outcome",
+            "rbac_violation", "security_violation", "response_time_ms",
+            "timestamp", "metadata",
+        ])
+        for e in entries:
+            writer.writerow([
+                e.query_id, e.username, e.role or "", e.query,
+                e.intent.value if e.intent else "", e.outcome,
+                e.rbac_violation, e.security_violation,
+                e.response_time_ms or "", e.timestamp.isoformat(),
+                str(e.metadata),
+            ])
+        output.seek(0)
+        return StreamingResponse(
+            iter([output.getvalue()]),
+            media_type="text/csv",
+            headers={"Content-Disposition": "attachment; filename=audit_export.csv"},
+        )
+
+    return {
+        "export_count": len(entries),
+        "entries": [e.model_dump(mode="json") for e in entries],
+    }

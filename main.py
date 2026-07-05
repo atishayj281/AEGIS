@@ -1,5 +1,3 @@
-"""Enterprise RAG Intelligence Platform - FastAPI Application."""
-
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -10,6 +8,7 @@ from app.api.routes import router
 from app.api.admin import admin_router
 from app.config import get_settings
 from app.retrieval.vector_store import VectorStore
+from app.security.headers import SecurityHeadersMiddleware
 
 
 @asynccontextmanager
@@ -29,6 +28,10 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# Security headers — registered first so they apply to every response,
+# including CORS pre-flight responses.
+app.add_middleware(SecurityHeadersMiddleware)
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -39,6 +42,7 @@ app.add_middleware(
 
 app.include_router(router, prefix="/api/v1", tags=["RAG"])
 app.include_router(admin_router, prefix="/admin", tags=["Admin — User Provisioning"])
+
 
 
 
