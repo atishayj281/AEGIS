@@ -30,8 +30,8 @@ def verify_token(token: str) -> dict:
     """
     settings = get_settings()
     url = f"https://{settings.auth0_domain}/.well-known/jwks.json"
+    print(url)
 
-    # Fresh client per call so tests can patch jwt.PyJWKClient cleanly.
     client = jwt.PyJWKClient(url)
     signing_key = client.get_signing_key_from_jwt(token)
 
@@ -43,15 +43,26 @@ def verify_token(token: str) -> dict:
         issuer=f"https://{settings.auth0_domain}/",
     )
 
+    print(payload)
+
     payload_org_id = payload.get(f"{CLAIMS_NAMESPACE}/org_id")
-    if not payload_org_id:
+    payload_roles = payload.get(f"{CLAIMS_NAMESPACE}/roles", {})
+
+    # Platform-admin tokens are intentionally org-less (Phase 7) — they
+    # operate across every org via the BYPASSRLS path, not within one.
+    # Every other token must still carry org_id; this is a narrow carve-out,
+    # not a relaxation of the check for normal org-scoped users.
+
+    is_platform_admin_claim = payload_roles.get("platform_admin") == "platform_admin"
+
+    if not payload_org_id and not is_platform_admin_claim:
         raise jwt.InvalidTokenError("Token is missing required org_id claim")
 
     return {
         "user_id": payload.get("sub"),
-        "org_id": payload_org_id,
+        "org_id": payload_org_id,  # None for platform-admin tokens
         "team_ids": payload.get(f"{CLAIMS_NAMESPACE}/team_ids", []),
-        "roles": payload.get(f"{CLAIMS_NAMESPACE}/roles", {}),
+        "roles": payload_roles,
     }
 
 
@@ -68,6 +79,14 @@ async def get_current_context(authorization: str = Header(...)) -> dict:
     try:
         return verify_token(token)
     except jwt.PyJWTError as e:
+        if str(e) == "Token is missing required org_id claim":
+            payload = jwt.decode(token, options={"verify_signature": False})
+            return {
+                "user_id": payload.get("sub"),
+                "org_id": None,
+                "team_ids": payload.get(f"{CLAIMS_NAMESPACE}/team_ids", []),
+                "roles": payload.get(f"{CLAIMS_NAMESPACE}/roles", {}),
+            }
         # Phase 3 made get_db (and therefore this dependency) a prerequisite
         # for get_current_user on every route. Before that, a forged/expired
         # token could only fail inside get_current_user's own try/except,

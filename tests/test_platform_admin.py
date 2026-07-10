@@ -81,8 +81,8 @@ def _make_bypass_session(platform_admin_rows=None, org_rows=None):
             result.scalar.return_value = len(rows)
         elif "FROM ORGANIZATIONS" in sql:
             rows = org_rows if org_rows is not None else [
-                (uuid.UUID(ORG_ACME_ID), "Acme Corp", "enterprise"),
-                (uuid.UUID(ORG_GLOBEX_ID), "Globex Inc", "enterprise"),
+                (uuid.UUID(ORG_ACME_ID), "Acme Corp", "acme-corp", True, None),
+                (uuid.UUID(ORG_GLOBEX_ID), "Globex Inc", "globex-inc", True, None),
             ]
             result.fetchall.return_value = rows
             result.fetchone.return_value = rows[0] if rows else None
@@ -90,7 +90,7 @@ def _make_bypass_session(platform_admin_rows=None, org_rows=None):
             result.scalar.return_value = 3
         elif "COUNT(*)" in sql and "FROM DOCUMENTS" in sql:
             result.scalar.return_value = 7
-        elif "MAX(CT.TS)" in sql:
+        elif "MAX(CT.CREATED_AT)" in sql:
             result.scalar.return_value = None
         else:
             result.fetchone.return_value = None

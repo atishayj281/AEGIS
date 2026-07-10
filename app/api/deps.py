@@ -117,6 +117,7 @@ async def get_current_user(
     credentials: HTTPAuthorizationCredentials = Depends(security),
     db: AsyncSession = Depends(get_db),
 ) -> User:
+    print(credentials)
     """Verify the Auth0 Bearer token and return the authenticated User.
 
     The frontend is responsible for obtaining the token from Auth0.
@@ -156,6 +157,19 @@ async def get_current_user(
 # ---------------------------------------------------------------------------
 # Phase 7 — Platform admin bypass dependency
 # ---------------------------------------------------------------------------
+
+async def verify_platform_admin_row(session: AsyncSession, auth0_sub: str) -> bool:
+    """Verify if the platform_admins DB row exists and is active (authoritative check)."""
+    result = await session.execute(
+        text(
+            "SELECT id FROM platform_admins "
+            "WHERE auth0_sub = :sub AND is_active = true "
+            "LIMIT 1"
+        ),
+        {"sub": auth0_sub},
+    )
+    return result.fetchone() is not None
+
 
 async def get_platform_admin_db(
     credentials: HTTPAuthorizationCredentials = Depends(security),
@@ -215,15 +229,7 @@ async def get_platform_admin_db(
     # We use the bypass session here for consistency (avoids needing to pass
     # an org_id just to check a non-RLS table).
     async with platform_admin_session() as session:
-        result = await session.execute(
-            text(
-                "SELECT id FROM platform_admins "
-                "WHERE auth0_sub = :sub AND is_active = true "
-                "LIMIT 1"
-            ),
-            {"sub": auth0_sub},
-        )
-        if result.fetchone() is None:
+        if not await verify_platform_admin_row(session, auth0_sub):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="No active platform_admins record found for this token",

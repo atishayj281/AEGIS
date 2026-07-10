@@ -7,6 +7,7 @@ from app import __version__
 from app.api.routes import router
 from app.api.admin import admin_router
 from app.api.platform_admin import router as platform_admin_router
+from app.api.login import router as login_router
 from app.config import get_settings
 from app.retrieval.vector_store import VectorStore
 from app.security.headers import SecurityHeadersMiddleware
@@ -35,7 +36,7 @@ app.add_middleware(SecurityHeadersMiddleware)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["http://localhost:3000"],  # add prod origin(s) too when ready
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -44,6 +45,7 @@ app.add_middleware(
 app.include_router(router, prefix="/api/v1", tags=["RAG"])
 app.include_router(admin_router, prefix="/admin", tags=["Admin — User Provisioning"])
 app.include_router(platform_admin_router, tags=["Platform Admin (superuser)"])
+app.include_router(login_router, prefix="/api/v1", tags=["Identity"])
 
 
 

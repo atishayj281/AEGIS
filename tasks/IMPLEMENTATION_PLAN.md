@@ -1,12 +1,12 @@
 # Implementation Plan — Enterprise RAG Intelligence Platform Multi-Tenancy Migration
 
 ```yaml
-plan_version: 1.2
+plan_version: 1.3
 target_repo: enterprise-rag-platform
 migration_type: incremental
 base_branch: main
 pre_migration_tag: pre-migration-v1
-total_phases: 7
+total_phases: 8
 ```
 
 ## Instructions for the executing agent
@@ -32,7 +32,13 @@ phase_1 (auth0)
                     └── phase_5 (redis_scale)
                           └── phase_6 (compliance_audit)
                                 └── phase_7 (platform_superuser)
+                                └── phase_8 (org_scoped_rbac)
 ```
+
+`phase_8` depends on `phase_3` (it replaces `ROLE_PERMISSIONS_V2`, which 3.2/3.3
+introduced) and does not depend on `phase_7` — the two are independent
+extensions of the tenancy model and can be built in either order. Listed
+after `phase_7` here only because that is the current state of `main`.
 
 No phase may run concurrently with another. Each depends strictly on the one before it.
 
@@ -666,7 +672,7 @@ pytest tests/test_metrics.py -v
 phase_id: phase_7
 branch: feature/platform-superuser
 depends_on: [phase_2]
-status: not_started
+status: complete
 ```
 
 ### Rationale (one line, for context only)
@@ -775,7 +781,221 @@ pytest tests/test_compliance.py -v
 
 ---
 
-## Final repository-wide check (run after Phase 7 merges)
+## Phase 8 — Org-Scoped RBAC: Per-Organization Role Definitions
+
+```yaml
+phase_id: phase_8
+branch: feature/org-scoped-rbac
+depends_on: [phase_3]
+status: not_started
+```
+
+### Rationale (one line, for context only)
+`ROLE_PERMISSIONS_V2` (Phase 3) is a single Python dict shared by every org on
+the platform — two orgs cannot have different roles, and the same role name
+cannot mean different things for different orgs. Different customers have
+genuinely different org structures and compliance needs; this phase moves
+role definitions from a hardcoded module constant into per-org, database-backed
+configuration.
+
+### Discovery findings folded into this phase (pre-implementation)
+
+1. `ROLE_PERMISSIONS_V2` is defined once, at module scope, in `app/auth/rbac.py`,
+   with no `org_id` dimension anywhere in it. `resolve_access` step 4
+   (`ROLE_PERMISSIONS_V2[membership.role]`) looks this up by role name alone —
+   `acme-corp`'s `compliance_officer` and `globex-inc`'s `compliance_officer`
+   necessarily resolve to the identical permission set today, because there is
+   only one dict, not one per org.
+2. `team_memberships.role` is a free-text column (added in Phase 2's
+   `0001_tenancy_schema.py`) with no foreign key or check constraint tying it
+   to a defined set of valid roles per org. This means the schema already
+   permits an org-specific role name to be assigned to a membership — it's
+   only `resolve_access`'s hardcoded lookup that prevents it from resolving to
+   anything meaningful. This phase closes that gap rather than widening the
+   schema further.
+3. This phase changes step 4 of `resolve_access` (defined in Phase 3, task
+   3.3) and nothing else in that function — steps 1, 2, 3, and 5 (tenant
+   filter, membership lookup, expiry check, `resource_grants` fallback) are
+   unaffected and must not be touched by this phase's tasks.
+4. Two existing orgs (`acme-corp`, `globex-inc`) currently rely on the global
+   `ROLE_PERMISSIONS_V2` values. This phase must backfill both orgs with
+   their current effective permissions before removing the global dict, so
+   that no existing user's access silently changes as a side effect of this
+   migration. This is a correctness requirement, not just good practice —
+   test 8.6 below exists specifically to catch a bad backfill.
+
+### Tasks
+
+**8.1 — Create `org_role_permissions` table**
+- File: `alembic/versions/0006_org_role_permissions.py` (new migration —
+  confirm the actual latest revision id on `main` before setting
+  `down_revision`; do not assume it is `0005`, since Phase 6/7 migrations may
+  have landed in an order this plan doc doesn't fully capture)
+- Columns: `id (uuid, pk)`, `org_id (uuid, fk -> organizations.id)`,
+  `role_name (text)`, `allowed_data_sources (jsonb)` — a JSON array of data
+  source type strings, or the literal `["*"]` for full access, mirroring
+  `ROLE_PERMISSIONS_V2`'s existing `{"*"}` convention so the semantics carry
+  over exactly. `created_at (timestamptz, default now())`,
+  `updated_at (timestamptz, default now())`.
+- Unique constraint on `(org_id, role_name)` — one definition per role name
+  per org, no duplicates.
+- Enable RLS with the same `tenant_isolation` policy pattern as every other
+  `org_id`-bearing table since Phase 2 — this table is exactly the kind of
+  data that must not leak across orgs (one org's custom role definitions are
+  not another org's business).
+- Down-migration: drop the RLS policy, then drop the table.
+
+**8.2 — Backfill existing orgs with current global permissions**
+- File: `scripts/backfill_org_role_permissions.py` (new file, same idiom as
+  `scripts/seed_team_memberships.py` and `scripts/migrate_sqlite_to_pg.py`)
+- For every existing org (at minimum `acme-corp` and `globex-inc`, and any
+  other org present in `organizations` at run time — do not hardcode just
+  the two demo orgs), insert one `org_role_permissions` row per key in the
+  current `ROLE_PERMISSIONS_V2` dict, translating `{"*"}` to `["*"]` and
+  each other set to a JSON array of its members.
+- Idempotency requirement, consistent with every other migration/seed script
+  in this plan: use `INSERT ... ON CONFLICT (org_id, role_name) DO NOTHING`,
+  so running this script twice does not error or duplicate rows.
+- This script must run and be verified (task 8.6's backfill test) **before**
+  8.4 removes `ROLE_PERMISSIONS_V2` — per the "earlier phases run old and new
+  paths side by side" rule from the top-level instructions, both the global
+  dict and the new per-org table exist simultaneously until the cutover task
+  confirms the new path is correct.
+
+**8.3 — Update `resolve_access` step 4 to read per-org permissions**
+- File: `app/auth/rbac.py` (modify existing — same file as Phase 3's 3.2/3.3;
+  do not create a second RBAC module)
+- Replace the step 4 lookup:
+  ```python
+  # Before (Phase 3):
+  allowed = ROLE_PERMISSIONS_V2.get(membership.role, set())
+
+  # After (this phase):
+  allowed = get_org_role_permissions(ctx["org_id"], membership.role)
+  ```
+- Implement `get_org_role_permissions(org_id: str, role_name: str) -> set[str]`
+  as a DB lookup against `org_role_permissions` (RLS-scoped automatically via
+  the existing tenant-scoped session, consistent with how every other lookup
+  in `resolve_access` already works — no new session-scoping mechanism is
+  needed here).
+- **Fallback behavior, explicit and deliberate:** if no row exists for
+  `(org_id, role_name)` — e.g. an org that has not yet defined any custom
+  roles — fall back to `ROLE_PERMISSIONS_V2.get(role_name, set())` rather than
+  returning an empty set outright. This keeps any org that hasn't touched
+  role configuration behaviorally identical to today, and is the reason
+  `ROLE_PERMISSIONS_V2` is not deleted in this task (see 8.4).
+- Do not alter steps 1, 2, 3, or 5 of `resolve_access` in this task — this is
+  a narrow, single-step change, matching the discipline Phase 3's 3.3
+  established ("each step may only narrow access, never widen it").
+
+**8.4 — Org role management endpoints**
+- File: `app/api/org_roles.py` (new file)
+- Add, all `org_admin`-only via the existing `resolve_access(ctx, "*",
+  team_id=None)` org-wide admin check (same pattern Phase 3's 3.4 established
+  for the delete route — do not invent a second admin-check helper):
+  - `GET /api/v1/org/{org_id}/roles` — list all `org_role_permissions` rows
+    for the org (falling back to `ROLE_PERMISSIONS_V2`'s keys, with a flag
+    indicating "default" vs. "custom", if the org has not defined any of its
+    own yet).
+  - `POST /api/v1/org/{org_id}/roles` — create or update a role definition
+    (`role_name`, `allowed_data_sources`), upserting into
+    `org_role_permissions`.
+  - `DELETE /api/v1/org/{org_id}/roles/{role_name}` — remove a custom role
+    definition, reverting that role name to the global `ROLE_PERMISSIONS_V2`
+    fallback (via 8.3's fallback logic) rather than to "no access" — deleting
+    a customization should not silently lock out every member who holds that
+    role.
+- Guard against removing or renaming a role that is still assigned to at
+  least one active (non-expired) `team_memberships` row without an explicit
+  confirmation flag in the request body — same defensive pattern as Phase
+  6's `DELETE /api/v1/org/{org_id}` confirmation-token requirement.
+
+**8.5 — Remove global dict only once per-org path is proven**
+- File: `app/auth/rbac.py` (same file)
+- **Do not remove `ROLE_PERMISSIONS_V2` in this phase.** Unlike Phase 3's
+  3.4, which had a clear cutover point (all four call sites migrated), this
+  phase's fallback behavior (8.3) means the global dict remains a permanent,
+  intentional part of the design — it is the platform-wide default for any
+  org that has not customized a given role, not legacy code awaiting
+  deletion. Document this explicitly in a comment above the dict so a future
+  agent does not mistake it for dead code and remove it.
+
+**8.6 — Adversarial and regression test suite**
+- File: `tests/test_org_rbac.py` (new file, same structural pattern as
+  `tests/test_rbac.py` from Phase 3)
+- Add:
+
+```python
+def test_same_role_name_different_permissions_per_org(org_a_ctx, org_b_ctx):
+    set_org_role(org_a_ctx.org_id, "compliance_officer", ["compliance_records"])
+    set_org_role(org_b_ctx.org_id, "compliance_officer", ["compliance_records", "financial_db"])
+    assert resolve_access(org_a_ctx_as("compliance_officer"), "financial_db", team_id=T) is False
+    assert resolve_access(org_b_ctx_as("compliance_officer"), "financial_db", team_id=T) is True
+    # The critical assertion: identical role name, genuinely different
+    # effective permissions, because org_id is now part of the lookup key.
+
+def test_backfill_preserves_existing_access(org_a_ctx):
+    # Regression guard: an org that existed before this phase must see
+    # zero change in effective permissions immediately after backfill.
+    for role, expected in ROLE_PERMISSIONS_V2.items():
+        assert get_org_role_permissions(org_a_ctx.org_id, role) == expected
+
+def test_org_without_custom_roles_falls_back_to_global(org_c_ctx):
+    # org_c_ctx is a freshly created org with no org_role_permissions rows.
+    assert get_org_role_permissions(org_c_ctx.org_id, "employee") == {"public_policies"}
+
+def test_deleting_custom_role_reverts_to_fallback_not_lockout(org_a_ctx):
+    set_org_role(org_a_ctx.org_id, "employee", ["public_policies", "system_metrics"])
+    delete_org_role(org_a_ctx.org_id, "employee", confirm=True)
+    assert get_org_role_permissions(org_a_ctx.org_id, "employee") == {"public_policies"}
+
+def test_custom_role_definitions_do_not_leak_across_orgs(org_a_ctx, org_b_ctx):
+    set_org_role(org_a_ctx.org_id, "quality_inspector", ["compliance_records"])
+    roles_b = list_org_roles(org_b_ctx.org_id)
+    assert "quality_inspector" not in {r.role_name for r in roles_b}
+```
+
+- `test_backfill_preserves_existing_access` is the load-bearing regression
+  test for this entire phase — per the discovery finding above, a bad
+  backfill is the single most likely way this phase silently breaks existing
+  users' access.
+
+### Verification
+
+```bash
+# 1. Same role name genuinely means different things per org
+pytest tests/test_org_rbac.py::test_same_role_name_different_permissions_per_org -v
+
+# 2. Backfill did not change any existing org's effective permissions
+pytest tests/test_org_rbac.py::test_backfill_preserves_existing_access -v
+
+# 3. Orgs with no customization behave exactly as before this phase
+pytest tests/test_org_rbac.py::test_org_without_custom_roles_falls_back_to_global -v
+
+# 4. Deleting a customization reverts to default, never to lockout
+pytest tests/test_org_rbac.py::test_deleting_custom_role_reverts_to_fallback_not_lockout -v
+
+# 5. Custom role definitions are tenant-isolated like every other org_id-scoped table
+pytest tests/test_org_rbac.py::test_custom_role_definitions_do_not_leak_across_orgs -v
+
+# 6. Existing Phase 3 RBAC suite still passes unmodified — steps 1/2/3/5 of
+#    resolve_access were not touched by this phase
+pytest tests/test_rbac.py -v
+
+# 7. Confirm ROLE_PERMISSIONS_V2 still exists (fallback, not dead code) but
+#    is only referenced from within rbac.py itself, not directly from routes
+grep -rn "ROLE_PERMISSIONS_V2" app/ --include="*.py" | grep -v "app/auth/rbac.py" ; test $? -ne 0
+```
+
+**Phase 8 is complete only if all seven verification steps pass, with (2)
+specifically confirming zero regression for `acme-corp`/`globex-inc`'s
+existing users, and (7) confirming the global dict survives as an internal
+fallback rather than being deleted or bypassed by any route calling it
+directly.**
+
+---
+
+## Final repository-wide check (run after Phase 8 merges)
 
 ```bash
 # No legacy code paths should remain
@@ -788,11 +1008,18 @@ grep -rln "aegis_platform_admin\|PLATFORM_ADMIN_DATABASE_URL" app/ \
 # No route module other than platform_admin.py imports the bypass dependency
 grep -rn "get_platform_admin_db" app/api/routes.py app/api/compliance.py app/api/org.py ; test $? -ne 0
 
+# ROLE_PERMISSIONS_V2 remains an internal fallback only, not referenced
+# directly by any route
+grep -rn "ROLE_PERMISSIONS_V2" app/ --include="*.py" | grep -v "app/auth/rbac.py" ; test $? -ne 0
+
 # Full test suite, all phases
 pytest tests/ -v
 
 # Full cross-tenant isolation suite, all layers
 pytest tests/test_tenant_isolation.py -v
+
+# Full org-scoped RBAC suite
+pytest tests/test_org_rbac.py -v
 ```
 
 If any of these fail, do not consider the migration complete — identify which phase's verification was insufficient and add a regression test before resolving.
