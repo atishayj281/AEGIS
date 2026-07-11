@@ -8,6 +8,7 @@ export default function LoginScreen({ onLogin, onDemo, error, loading }) {
 
   const demoUsersMap = {
     admin: "admin_user",
+    team_lead: "team_lead",
     compliance_officer: "compliance_officer",
     finance_analyst: "finance_analyst",
     operations_engineer: "ops_engineer",
@@ -28,31 +29,38 @@ export default function LoginScreen({ onLogin, onDemo, error, loading }) {
         alignItems: "center",
         justifyContent: "center",
         padding: "24px",
-        backgroundImage: `radial-gradient(circle at 10% 20%, rgba(226, 184, 87, 0.03) 0%, transparent 40%), radial-gradient(circle at 90% 80%, rgba(56, 189, 248, 0.03) 0%, transparent 40%)`,
+        position: "relative",
+        overflow: "hidden",
       }}
     >
-      <div style={{ width: "100%", maxWidth: "440px" }} className="aegis-fade-in">
+      {/* Background neon glow spots for glassmorphic contrast */}
+      <div style={{ position: "absolute", width: "400px", height: "400px", background: "radial-gradient(circle, rgba(99, 102, 241, 0.08) 0%, transparent 70%)", top: "15%", left: "15%", pointerEvents: "none", zIndex: 1 }} />
+      <div style={{ position: "absolute", width: "450px", height: "450px", background: "radial-gradient(circle, rgba(245, 158, 11, 0.07) 0%, transparent 70%)", bottom: "10%", right: "15%", pointerEvents: "none", zIndex: 1 }} />
+
+      <div style={{ width: "100%", maxWidth: "440px", zIndex: 10 }} className="aegis-fade-in">
+        
+        {/* Branding header */}
         <div style={{ textAlign: "center", marginBottom: "28px" }}>
           <div
             style={{
               display: "inline-flex",
               alignItems: "center",
               justifyContent: "center",
-              width: "60px",
-              height: "60px",
-              borderRadius: "16px",
-              background: `rgba(226, 184, 87, 0.08)`,
-              border: `1px solid rgba(226, 184, 87, 0.3)`,
+              width: "64px",
+              height: "64px",
+              borderRadius: "18px",
+              background: `rgba(245, 158, 11, 0.06)`,
+              border: `1px solid rgba(245, 158, 11, 0.25)`,
               marginBottom: "16px",
-              boxShadow: "0 0 20px rgba(226, 184, 87, 0.15)",
+              boxShadow: "0 8px 24px rgba(245, 158, 11, 0.08)",
             }}
           >
-            <Shield size={30} color={C.gold} className="aegis-glow-pulse" />
+            <Shield size={28} color={C.gold} className="aegis-glow-pulse" />
           </div>
-          <h1 className="aegis-display" style={{ fontSize: "32px", fontWeight: 700, margin: 0, letterSpacing: "0.05em", color: C.text }}>
+          <h1 className="aegis-display" style={{ fontSize: "30px", fontWeight: 700, margin: 0, letterSpacing: "0.06em", color: C.text }}>
             AEGIS
           </h1>
-          <p style={{ color: C.muted, fontSize: "13px", marginTop: "6px" }}>
+          <p style={{ color: C.muted, fontSize: "12.5px", marginTop: "4px", fontWeight: 500, letterSpacing: "0.02em" }}>
             Enterprise Intelligence Console
           </p>
         </div>
@@ -62,17 +70,18 @@ export default function LoginScreen({ onLogin, onDemo, error, loading }) {
           style={{
             display: "flex",
             gap: "4px",
-            marginBottom: "18px",
-            background: "rgba(14, 20, 32, 0.6)",
-            border: `1px solid ${C.border}`,
+            marginBottom: "20px",
+            background: "rgba(255, 255, 255, 0.02)",
+            border: `1px solid rgba(255, 255, 255, 0.06)`,
             borderRadius: "12px",
             padding: "4px",
             backdropFilter: "blur(8px)",
+            WebkitBackdropFilter: "blur(8px)",
           }}
         >
           {[
             { key: "live", label: "Live Server API" },
-            { key: "demo", label: "Sandbox Demo" },
+            { key: "demo", label: "Sandbox Simulator" },
           ].map((t) => (
             <button
               key={t.key}
@@ -80,36 +89,41 @@ export default function LoginScreen({ onLogin, onDemo, error, loading }) {
               className="aegis-btn"
               style={{
                 flex: 1,
-                padding: "10px 12px",
+                padding: "9px 12px",
                 borderRadius: "8px",
                 border: "none",
                 cursor: "pointer",
-                background: tab === t.key ? "var(--bg-panel-hover)" : "transparent",
+                background: tab === t.key ? "rgba(255, 255, 255, 0.06)" : "transparent",
                 color: tab === t.key ? C.text : C.muted,
-                boxShadow: tab === t.key ? "var(--shadow-sm)" : "none",
+                boxShadow: tab === t.key ? "0 2px 8px rgba(0, 0, 0, 0.15)" : "none",
+                fontSize: "12.5px",
+                fontWeight: 600,
+                transition: "all 0.2s cubic-bezier(0.4, 0, 0.2, 1)",
               }}
             >
-              {t.key === "demo" && <Sparkles size={13} style={{ marginRight: "4px" }} />}
+              {t.key === "demo" && <Sparkles size={12} style={{ marginRight: "4px" }} />}
               {t.label}
             </button>
           ))}
         </div>
 
+        {/* Form Panel (Glassmorphism card) */}
         {tab === "live" ? (
           <form
             onSubmit={handleLoginSubmit}
-            className="aegis-glow-pulse"
+            className="aegis-glass-panel"
             style={{
-              background: C.panel,
-              border: `1px solid ${C.border}`,
-              borderRadius: "16px",
-              padding: "24px",
-              boxShadow: "var(--shadow-md)",
+              padding: "28px",
+              boxShadow: "0 20px 40px rgba(0, 0, 0, 0.3)",
+              background: "rgba(15, 23, 42, 0.5)",
             }}
           >
-            <p style={{ color: C.muted, fontSize: "13px", marginBottom: "20px", lineHeight: 1.5 }}>
-              Sign in securely via Auth0 Universal Login. You'll be redirected
-              to authenticate and brought back here automatically.
+            <h3 className="aegis-display" style={{ fontSize: "16px", fontWeight: 700, marginBottom: "10px", color: C.text }}>
+              Secure SSO Authorization
+            </h3>
+            <p style={{ color: C.muted, fontSize: "13px", marginBottom: "20px", lineHeight: 1.6 }}>
+              Sign in securely via Auth0 Universal Login. You will be redirected
+              to authenticate and authorized access permissions will automatically map to your account profile.
             </p>
 
             {error && (
@@ -118,11 +132,11 @@ export default function LoginScreen({ onLogin, onDemo, error, loading }) {
                   display: "flex",
                   gap: "8px",
                   alignItems: "flex-start",
-                  background: "rgba(239, 68, 68, 0.08)",
-                  border: `1px solid rgba(239, 68, 68, 0.3)`,
+                  background: "rgba(244, 63, 94, 0.08)",
+                  border: `1px solid rgba(244, 63, 94, 0.25)`,
                   borderRadius: "8px",
                   padding: "10px 12px",
-                  marginBottom: "16px",
+                  marginBottom: "18px",
                   fontSize: "12px",
                   color: C.danger,
                 }}
@@ -136,86 +150,98 @@ export default function LoginScreen({ onLogin, onDemo, error, loading }) {
               type="submit"
               disabled={loading}
               className="aegis-btn aegis-btn-primary"
-              style={{ width: "100%", padding: "12px", fontSize: "14px" }}
+              style={{ width: "100%", padding: "12px", fontSize: "13.5px", borderRadius: "10px" }}
             >
               {loading ? (
                 <Loader2 size={16} className="aegis-spin" />
               ) : (
-                <Lock size={15} />
+                <Lock size={14} />
               )}
-              {loading ? "Redirecting…" : "Sign in with Auth0"}
+              {loading ? "Redirecting to Auth0…" : "Sign in with Auth0"}
             </button>
 
             <div
               style={{
-                marginTop: "16px",
-                fontSize: "10.5px",
+                marginTop: "18px",
+                fontSize: "11px",
                 color: C.muted,
                 textAlign: "center",
                 lineHeight: "1.4",
               }}
             >
-              Authentication and roles are managed in your Auth0 tenant.
+              Directory tokens and database isolation boundaries are encrypted.
             </div>
           </form>
         ) : (
           <div
+            className="aegis-glass-panel"
             style={{
-              background: C.panel,
-              border: `1px solid ${C.border}`,
-              borderRadius: "16px",
               padding: "12px",
-              boxShadow: "var(--shadow-md)",
+              boxShadow: "0 20px 40px rgba(0, 0, 0, 0.3)",
+              background: "rgba(15, 23, 42, 0.5)",
             }}
           >
-            {Object.entries(ROLES).map(([key, role]) => (
-              <button
-                key={key}
-                className="aegis-btn aegis-row"
-                onClick={() => onDemo(key)}
-                onMouseEnter={() => setDemoHover(key)}
-                onMouseLeave={() => setDemoHover(null)}
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "space-between",
-                  width: "100%",
-                  padding: "14px 16px",
-                  borderRadius: "12px",
-                  border: `1px solid ${demoHover === key ? `${role.accent}55` : "transparent"}`,
-                  background: demoHover === key ? "var(--bg-panel-hover)" : "transparent",
-                  cursor: "pointer",
-                  color: C.text,
-                  marginBottom: "4px",
-                }}
-              >
-                <div style={{ display: "flex", alignItems: "center", gap: "14px" }}>
-                  <div
-                    style={{
-                      width: "36px",
-                      height: "36px",
-                      borderRadius: "10px",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      background: `${role.accent}14`,
-                      border: `1px solid ${role.accent}40`,
-                    }}
-                  >
-                    <Shield size={17} color={role.accent} />
-                  </div>
-                  <div>
-                    <div style={{ fontSize: "14px", fontWeight: 600 }}>{role.label}</div>
-                    <div className="aegis-mono" style={{ fontSize: "11px", color: C.muted, marginTop: "1px" }}>
-                      User: {demoUsersMap[key] || `${key}_user`}
+            <div style={{ padding: "10px 16px 8px 16px" }}>
+              <h3 className="aegis-display" style={{ fontSize: "15px", fontWeight: 700, color: C.text }}>
+                Select Sandbox Role Profile
+              </h3>
+              <p style={{ color: C.muted, fontSize: "11.5px", marginTop: "2px", lineHeight: "1.4" }}>
+                Enforce localized data queries, document vaults, and audit logs.
+              </p>
+            </div>
+            
+            <div style={{ marginTop: "8px" }}>
+              {Object.entries(ROLES).map(([key, role]) => (
+                <button
+                  key={key}
+                  className="aegis-btn aegis-row"
+                  onClick={() => onDemo(key)}
+                  onMouseEnter={() => setDemoHover(key)}
+                  onMouseLeave={() => setDemoHover(null)}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    width: "100%",
+                    padding: "12px 16px",
+                    borderRadius: "10px",
+                    border: `1px solid ${demoHover === key ? `${role.accent}40` : "transparent"}`,
+                    background: demoHover === key ? "rgba(255, 255, 255, 0.04)" : "transparent",
+                    cursor: "pointer",
+                    color: C.text,
+                    marginBottom: "4px",
+                    textAlign: "left",
+                    transition: "all 0.15s ease-in-out",
+                  }}
+                >
+                  <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+                    <div
+                      style={{
+                        width: "34px",
+                        height: "34px",
+                        borderRadius: "9px",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        background: `${role.accent}12`,
+                        border: `1px solid ${role.accent}25`,
+                      }}
+                    >
+                      <Shield size={16} color={role.accent} />
+                    </div>
+                    <div>
+                      <div style={{ fontSize: "13.5px", fontWeight: 600 }}>{role.label}</div>
+                      <div className="aegis-mono" style={{ fontSize: "10.5px", color: C.muted, marginTop: "1px" }}>
+                        ID: {demoUsersMap[key] || `${key}_user`}
+                      </div>
                     </div>
                   </div>
-                </div>
-                <ChevronRight size={16} color={C.muted} />
-              </button>
-            ))}
-            <div style={{ padding: "12px 16px 4px", fontSize: "11.5px", color: C.muted, textAlign: "center" }}>
-              Runs fully in-browser with localized mocks — no backend required.
+                  <ChevronRight size={14} color={C.muted} />
+                </button>
+              ))}
+            </div>
+            <div style={{ padding: "12px 16px 4px", fontSize: "11px", color: C.muted, textAlign: "center" }}>
+              Runs fully in-browser with mock records — no backend required.
             </div>
           </div>
         )}

@@ -114,12 +114,23 @@ The connection status pill in the top-right corner shows:
 | Username | Password | Role | Access Level |
 |---|---|---|---|
 | `admin_user` | `admin123` | **Admin** | All data sources |
+| `team_lead` | `lead123` | **Team Lead** | All data sources (scoped to own team) |
 | `compliance_officer` | `compliance123` | **Compliance Officer** | Compliance records, audit logs, public policies |
 | `finance_analyst` | `finance123` | **Finance Analyst** | Financial database, invoices, public policies |
 | `ops_engineer` | `ops123` | **Operations Engineer** | System metrics, audit logs, public policies |
 | `employee_user` | `employee123` | **Employee** | Public policies only |
 
 > In **Demo Mode** simply click the role card — no password required.
+
+---
+
+## Org-Scoped Self-Service Provisioning
+
+AEGIS supports decentralized org-scoped provisioning:
+- **`org_admin`** has full access to create teams (via the **Manage Teams** tab) and provision/update/deactivate users org-wide.
+- **`team_lead`** has access to provision/update/deactivate users strictly within the teams they lead.
+- The **Organization UUID** input field is automatically resolved by the backend from caller context and hidden from the UI.
+- Granting/promoting to `org_admin` is restricted to platform superusers.
 
 ---
 

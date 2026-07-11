@@ -1,41 +1,44 @@
 @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
 
 :root {
-  /* Premium Dark Theme Palette */
-  --bg-main: #06090e;
-  --bg-sidebar: #0b0f17;
-  --bg-panel: #0e1420;
-  --bg-panel-hover: #151c2c;
-  --bg-input: #121824;
-  --border-color: #1e293b;
-  --border-color-soft: #141c2c;
+  /* Premium Dark HSL Palette */
+  --bg-main: #030712;
+  --bg-panel: rgba(15, 23, 42, 0.45);
+  --bg-panel-hover: rgba(30, 41, 59, 0.6);
+  --bg-input: rgba(17, 24, 39, 0.6);
+  --border-color: rgba(255, 255, 255, 0.08);
+  --border-color-soft: rgba(255, 255, 255, 0.04);
   
-  /* Text colors */
-  --text-main: #f1f5f9;
-  --text-muted: #94a3b8;
-  --text-dark: #64748b;
+  /* Text HSL colors */
+  --text-main: #f3f4f6;
+  --text-muted: #9ca3af;
+  --text-dark: #6b7280;
   
-  /* Accents */
-  --color-gold: #e2b857;
-  --color-gold-glow: rgba(226, 184, 87, 0.15);
-  --color-teal: #38bdf8;
-  --color-teal-glow: rgba(56, 189, 248, 0.15);
+  /* Accents (HSL tailored) */
+  --color-gold: #f59e0b;
+  --color-gold-glow: rgba(245, 158, 11, 0.12);
+  --color-teal: #06b6d4;
+  --color-teal-glow: rgba(6, 182, 212, 0.12);
   --color-success: #10b981;
-  --color-success-glow: rgba(16, 185, 129, 0.15);
-  --color-danger: #ef4444;
-  --color-danger-glow: rgba(239, 68, 68, 0.15);
-  --color-info: #0284c7;
-  --color-info-glow: rgba(2, 132, 199, 0.15);
+  --color-success-glow: rgba(16, 185, 129, 0.12);
+  --color-danger: #f43f5e;
+  --color-danger-glow: rgba(244, 63, 94, 0.12);
+  --color-info: #3b82f6;
+  --color-info-glow: rgba(59, 130, 246, 0.12);
   
   /* Layout sizes */
   --sidebar-width: 260px;
-  --border-radius: 12px;
+  --border-radius-lg: 16px;
+  --border-radius-md: 12px;
+  --border-radius-sm: 8px;
   --transition-speed: 0.2s;
+  --transition-swift: 0.25s cubic-bezier(0.4, 0, 0.2, 1);
   
-  /* Shadows */
-  --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.2);
-  --shadow-md: 0 4px 20px rgba(0, 0, 0, 0.4);
-  --shadow-glow: 0 0 15px var(--color-gold-glow);
+  /* Glassmorphism shadows and blurs */
+  --glass-blur: blur(16px);
+  --shadow-sm: 0 4px 12px rgba(0, 0, 0, 0.15);
+  --shadow-md: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+  --shadow-glow: 0 0 25px var(--color-gold-glow);
 }
 
 /* Base resets */
@@ -53,6 +56,20 @@ body {
   line-height: 1.5;
   overflow-x: hidden;
   -webkit-font-smoothing: antialiased;
+  position: relative;
+}
+
+/* Ambient glow nodes background */
+body::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 600px;
+  background: radial-gradient(circle at 50% 0%, rgba(99, 102, 241, 0.08) 0%, rgba(6, 182, 212, 0.03) 40%, transparent 70%);
+  pointer-events: none;
+  z-index: -1;
 }
 
 /* Custom Scrollbars */
@@ -66,12 +83,13 @@ body {
 }
 
 .aegis-scroll::-webkit-scrollbar-thumb {
-  background: var(--border-color);
+  background: rgba(255, 255, 255, 0.08);
   border-radius: 999px;
+  transition: background var(--transition-speed);
 }
 
 .aegis-scroll::-webkit-scrollbar-thumb:hover {
-  background: var(--text-dark);
+  background: rgba(255, 255, 255, 0.2);
 }
 
 /* Typography styles */
@@ -82,7 +100,8 @@ body {
 
 .aegis-mono {
   font-family: 'JetBrains Mono', monospace;
-  font-size: 0.9em;
+  font-size: 0.85em;
+  letter-spacing: -0.02em;
 }
 
 /* Animations */
@@ -105,10 +124,12 @@ body {
 
 @keyframes pulseGlow {
   0%, 100% {
-    box-shadow: 0 0 10px rgba(226, 184, 87, 0.05);
+    box-shadow: 0 0 15px rgba(245, 158, 11, 0.05);
+    border-color: rgba(245, 158, 11, 0.2);
   }
   50% {
-    box-shadow: 0 0 20px var(--color-gold-glow);
+    box-shadow: 0 0 30px var(--color-gold-glow);
+    border-color: rgba(245, 158, 11, 0.45);
   }
 }
 
@@ -129,61 +150,93 @@ body {
   animation: pulseGlow 3s infinite ease-in-out;
 }
 
-/* Buttons */
+/* Glassmorphism panel definitions */
+.aegis-glass-panel {
+  background: var(--bg-panel);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  border: 1px solid var(--border-color);
+  border-radius: var(--border-radius-lg);
+  box-shadow: var(--shadow-md);
+}
+
+.aegis-glass-card {
+  background: rgba(255, 255, 255, 0.02);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid var(--border-color-soft);
+  border-radius: var(--border-radius-md);
+  padding: 16px 20px;
+  box-shadow: var(--shadow-sm);
+  transition: all var(--transition-swift);
+}
+
+.aegis-glass-card:hover {
+  transform: translateY(-2px);
+  background: rgba(255, 255, 255, 0.04);
+  border-color: rgba(255, 255, 255, 0.12);
+  box-shadow: var(--shadow-sm), 0 4px 20px rgba(0, 0, 0, 0.2);
+}
+
+/* Buttons (swift feedback) */
 .aegis-btn {
   font-family: inherit;
   font-size: 13px;
-  font-weight: 600;
+  font-weight: 500;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 8px;
-  padding: 10px 16px;
-  border-radius: var(--border-radius);
+  padding: 9px 15px;
+  border-radius: var(--border-radius-md);
   border: 1px solid var(--border-color);
-  background: var(--bg-panel);
+  background: rgba(255, 255, 255, 0.03);
   color: var(--text-main);
   cursor: pointer;
-  transition: all var(--transition-speed) ease;
+  transition: all var(--transition-swift);
   user-select: none;
+  backdrop-filter: blur(4px);
 }
 
 .aegis-btn:hover:not(:disabled) {
-  background: var(--bg-panel-hover);
-  border-color: var(--text-dark);
+  background: rgba(255, 255, 255, 0.07);
+  border-color: rgba(255, 255, 255, 0.18);
+  transform: translateY(-1px);
 }
 
 .aegis-btn:active:not(:disabled) {
-  transform: scale(0.98);
+  transform: scale(0.97);
 }
 
 .aegis-btn:disabled {
-  opacity: 0.4;
+  opacity: 0.35;
   cursor: not-allowed;
 }
 
 .aegis-btn-primary {
   background: var(--color-gold-glow);
-  border-color: rgba(226, 184, 87, 0.4);
+  border-color: rgba(245, 158, 11, 0.3);
   color: var(--color-gold);
+  font-weight: 600;
 }
 
 .aegis-btn-primary:hover:not(:disabled) {
-  background: rgba(226, 184, 87, 0.25);
+  background: rgba(245, 158, 11, 0.2);
   border-color: var(--color-gold);
-  box-shadow: 0 0 12px var(--color-gold-glow);
+  box-shadow: 0 0 15px var(--color-gold-glow);
 }
 
 .aegis-btn-danger {
   background: var(--color-danger-glow);
-  border-color: rgba(239, 68, 68, 0.4);
+  border-color: rgba(244, 63, 94, 0.3);
   color: var(--color-danger);
+  font-weight: 600;
 }
 
 .aegis-btn-danger:hover:not(:disabled) {
-  background: rgba(239, 68, 68, 0.25);
+  background: rgba(244, 63, 94, 0.2);
   border-color: var(--color-danger);
-  box-shadow: 0 0 12px var(--color-danger-glow);
+  box-shadow: 0 0 15px var(--color-danger-glow);
 }
 
 /* Inputs and Forms */
@@ -191,27 +244,33 @@ body {
 .aegis-select,
 .aegis-textarea {
   font-family: inherit;
-  font-size: 13px;
+  font-size: 13.5px;
   color: var(--text-main);
   background: var(--bg-input);
   border: 1px solid var(--border-color);
-  border-radius: 8px;
+  border-radius: var(--border-radius-sm);
   padding: 10px 14px;
   width: 100%;
-  transition: all var(--transition-speed) ease;
+  transition: all var(--transition-swift);
 }
 
 .aegis-input:focus,
 .aegis-select:focus,
 .aegis-textarea:focus {
   outline: none;
-  border-color: var(--color-gold);
-  box-shadow: 0 0 8px var(--color-gold-glow);
+  background: rgba(17, 24, 39, 0.8);
+  border-color: rgba(245, 158, 11, 0.6);
+  box-shadow: 0 0 12px var(--color-gold-glow);
 }
 
 .aegis-input::placeholder,
 .aegis-textarea::placeholder {
   color: var(--text-dark);
+}
+
+.aegis-select option {
+  background-color: #0d1321;
+  color: var(--text-main);
 }
 
 .aegis-focus:focus-visible {
@@ -225,10 +284,10 @@ body {
 }
 
 .aegis-row:hover {
-  background-color: var(--bg-panel-hover);
+  background-color: rgba(255, 255, 255, 0.02);
 }
 
-/* Ticket tear effect */
+/* Ticket tear effect (glass style) */
 .aegis-ticket {
   position: relative;
 }
@@ -242,6 +301,7 @@ body {
   border-radius: 50%;
   top: 50%;
   transform: translateY(-50%);
+  z-index: 2;
 }
 
 .aegis-ticket::before {
@@ -258,7 +318,7 @@ body {
   align-items: center;
   gap: 12px;
   padding: 10px 14px;
-  border-radius: 8px;
+  border-radius: var(--border-radius-sm);
   border: none;
   background: transparent;
   color: var(--text-muted);
@@ -267,43 +327,48 @@ body {
   font-weight: 500;
   text-align: left;
   cursor: pointer;
-  transition: all var(--transition-speed) ease;
+  transition: all var(--transition-swift);
 }
 
 .aegis-sidebar-link:hover {
-  background: var(--bg-panel-hover);
+  background: rgba(255, 255, 255, 0.04);
   color: var(--text-main);
 }
 
 .aegis-sidebar-link.active {
-  background: var(--bg-panel);
+  background: rgba(255, 255, 255, 0.07);
   color: var(--text-main);
+  border-left: 2px solid var(--color-gold);
   font-weight: 600;
 }
 
 /* Stats Cards */
 .aegis-stat-card {
   background: var(--bg-panel);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
   border: 1px solid var(--border-color);
-  border-radius: var(--border-radius);
+  border-radius: var(--border-radius-md);
   padding: 16px 20px;
   display: flex;
   align-items: center;
   gap: 16px;
-  transition: transform var(--transition-speed) ease, border-color var(--transition-speed) ease;
+  transition: all var(--transition-swift);
 }
 
 .aegis-stat-card:hover {
   transform: translateY(-2px);
-  border-color: var(--text-dark);
+  border-color: rgba(255, 255, 255, 0.15);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
 }
 
 /* Modal Layout */
 .aegis-modal-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(4, 6, 10, 0.85);
-  backdrop-filter: blur(4px);
+  background: rgba(3, 7, 18, 0.82);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -312,9 +377,11 @@ body {
 }
 
 .aegis-modal-content {
-  background: var(--bg-panel);
+  background: rgba(15, 23, 42, 0.8);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
   border: 1px solid var(--border-color);
-  border-radius: 16px;
+  border-radius: var(--border-radius-lg);
   padding: 24px;
   width: 100%;
   box-shadow: var(--shadow-md);
@@ -323,13 +390,13 @@ body {
 
 /* Dropzone for uploads */
 .aegis-dropzone {
-  border: 2px dashed var(--border-color);
-  border-radius: var(--border-radius);
-  background: var(--bg-input);
+  border: 2px dashed rgba(255, 255, 255, 0.12);
+  border-radius: var(--border-radius-md);
+  background: rgba(255, 255, 255, 0.01);
   padding: 30px 20px;
   text-align: center;
   cursor: pointer;
-  transition: all var(--transition-speed) ease;
+  transition: all var(--transition-swift);
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -339,18 +406,21 @@ body {
 .aegis-dropzone:hover,
 .aegis-dropzone.active {
   border-color: var(--color-gold);
-  background: var(--bg-panel-hover);
+  background: rgba(255, 255, 255, 0.04);
+  box-shadow: inset 0 0 12px var(--color-gold-glow);
 }
 
 /* Custom Table Header & Structure */
 .aegis-table-container {
-  border: 1px solid var(--border-color-soft);
-  border-radius: var(--border-radius);
+  border: 1px solid var(--border-color);
+  border-radius: var(--border-radius-md);
   overflow: hidden;
+  background: rgba(15, 23, 42, 0.2);
+  backdrop-filter: blur(4px);
 }
 
 .aegis-table-header {
-  background: var(--bg-panel-hover);
+  background: rgba(255, 255, 255, 0.03);
   border-bottom: 1px solid var(--border-color);
 }
 
@@ -362,4 +432,36 @@ body {
   width: 100%;
   max-width: 720px;
   margin: 0 auto;
+}
+
+/* Interactive elements animations (swift lift & glow) */
+.aegis-row-glass {
+  background: rgba(255, 255, 255, 0.01);
+  border: 1px solid var(--border-color-soft);
+  border-radius: var(--border-radius-md);
+  transition: all var(--transition-swift);
+}
+
+.aegis-row-glass:hover {
+  background: rgba(255, 255, 255, 0.03);
+  border-color: rgba(255, 255, 255, 0.1);
+  transform: scale(1.005);
+}
+
+/* Custom active tabs styles */
+.aegis-tab-active {
+  background: rgba(245, 158, 11, 0.08) !important;
+  color: var(--text-main) !important;
+  border: 1px solid rgba(245, 158, 11, 0.25) !important;
+}
+
+.aegis-tab-active::after {
+  content: "";
+  position: absolute;
+  bottom: 0;
+  left: 10%;
+  right: 10%;
+  height: 2px;
+  background: var(--color-gold);
+  border-radius: 4px;
 }

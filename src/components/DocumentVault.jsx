@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import { Search, Plus, Eye, Trash2, AlertTriangle, Loader2, FileSearch, Lock } from "lucide-react";
-import { C, ROLES, CATEGORIES, categoryInfo, ClassificationBadge } from "./SmallComponents";
+import { C, ROLES, categoryInfo, ClassificationBadge } from "./SmallComponents";
 import UploadModal from "./UploadModal";
 import ViewModal from "./ViewModal";
 import DeleteConfirm from "./DeleteConfirm";
@@ -66,7 +66,6 @@ export default function DocumentVault({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
 
-  // Stable refs so effect deps don't change on every parent render
   const apiClientRef = useRef(apiClient);
   const normalizeRef = useRef(normalizeDocumentHelper);
   const onSessionExpiredRef = useRef(onSessionExpired);
@@ -76,8 +75,6 @@ export default function DocumentVault({
   onSessionExpiredRef.current = onSessionExpired;
   setDocumentsRef.current = setDocuments;
 
-  // Load documents from live API or use local simulation documents
-  // Depends only on live/apiBase/token — never on function identity
   useEffect(() => {
     if (!live) {
       setLoading(false);
@@ -109,11 +106,10 @@ export default function DocumentVault({
     return () => {
       cancelled = true;
     };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [live, apiBase, token]);
 
-  // Determine categories to show in filter list
-  const categoryOptions = live ? Object.keys(CATEGORIES) : role.categories;
+  // Constrain dropdown target categories to the ones the user actually has access to
+  const categoryOptions = role.categories;
 
   // Filter and search
   const visibleDocs = documents
@@ -121,13 +117,11 @@ export default function DocumentVault({
     .filter((d) => filter === "all" || d.category === filter)
     .filter((d) => d.name.toLowerCase().includes(search.toLowerCase()));
 
-  // Ingestion submit handler
   const handleCreate = async (payload) => {
     setBusy(true);
     setError(null);
     
     if (!live) {
-      // Simulate raw or file upload locally
       const id = `DOC-${100 + documents.length + 1}`;
       const sizeStr = payload.file ? `${(payload.file.size / 1024).toFixed(0)} KB` : "4 KB";
       const doc = {
@@ -155,7 +149,6 @@ export default function DocumentVault({
     try {
       const formData = new FormData();
       if (payload.isRawText) {
-        // Raw text paste - convert to text Blob/File to match backend Form/UploadFile parameter
         const blob = new Blob([payload.content], { type: "text/plain" });
         const file = new File([blob], payload.name, { type: "text/plain" });
         formData.append("file", file);
@@ -165,7 +158,6 @@ export default function DocumentVault({
       formData.append("data_source", payload.category);
       await apiClient.uploadDocument(apiBase, token, formData);
       
-      // Successfully uploaded! Trigger reloading document list
       const listData = await apiClient.listDocuments(apiBase, token);
       const list = Array.isArray(listData) ? listData : listData.documents || listData.items || [];
       setDocuments(list.map((d, idx) => normalizeDocumentHelper(d, idx)));
@@ -190,7 +182,6 @@ export default function DocumentVault({
     }
   };
 
-  // Preview details click handler
   const handleView = async (doc) => {
     setViewDoc(doc);
     if (!live) return;
@@ -204,13 +195,12 @@ export default function DocumentVault({
         onSessionExpired();
         return;
       }
-      setError(err.message || "Failed to retrieve full document contents.");
+      setError(err.message || "Failed to retrieve document content.");
     } finally {
       setLoadingDoc(false);
     }
   };
 
-  // Deletion confirm handler
   const handleDelete = async () => {
     setBusy(true);
     setError(null);
@@ -260,14 +250,14 @@ export default function DocumentVault({
             <h2 className="aegis-display" style={{ margin: 0, fontSize: "20px", fontWeight: 700 }}>
               Ingested Document Vault
             </h2>
-            <p style={{ margin: "4px 0 0", fontSize: "12px", color: C.muted }}>
-              {loading ? "Catalog loading…" : `${visibleDocs.length} active files registered in search index`}
+            <p style={{ margin: "4px 0 0", fontSize: "12.5px", color: C.muted }}>
+              {loading ? "Catalog indexing status..." : `${visibleDocs.length} active files referenced in search indices`}
             </p>
           </div>
           <button
             onClick={() => setShowUpload(true)}
             className="aegis-btn aegis-btn-primary"
-            style={{ padding: "10px 18px" }}
+            style={{ padding: "10px 18px", borderRadius: "10px" }}
           >
             <Plus size={15} /> Ingest Document
           </button>
@@ -278,8 +268,8 @@ export default function DocumentVault({
             style={{
               display: "flex",
               gap: "8px",
-              background: "rgba(239, 68, 68, 0.08)",
-              border: `1px solid rgba(239, 68, 68, 0.3)`,
+              background: "rgba(244, 63, 94, 0.08)",
+              border: `1px solid rgba(244, 63, 94, 0.25)`,
               borderRadius: "8px",
               padding: "10px 12px",
               marginBottom: "16px",
@@ -292,16 +282,16 @@ export default function DocumentVault({
           </div>
         )}
 
-        {/* Search and Filters grid */}
-        <div style={{ display: "flex", gap: "10px", flexWrap: "wrap", marginBottom: "16px" }}>
+        {/* Search and Filters */}
+        <div style={{ display: "flex", gap: "10px", flexWrap: "wrap", marginBottom: "18px" }}>
           <div style={{ position: "relative", flex: "1 1 240px" }}>
             <Search size={14} color={C.muted} style={{ position: "absolute", left: "12px", top: "12px" }} />
             <input
               className="aegis-input"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search index database by file name..."
-              style={{ padding: "9px 12px 9px 34px" }}
+              placeholder="Search database by file name..."
+              style={{ padding: "9px 12px 9px 34px", borderRadius: "10px", background: "rgba(0,0,0,0.2)" }}
             />
           </div>
           <div style={{ display: "flex", gap: "6px", flexWrap: "wrap", alignItems: "center" }}>
@@ -309,12 +299,13 @@ export default function DocumentVault({
               onClick={() => setFilter("all")}
               className="aegis-btn"
               style={{
-                padding: "8px 12px",
+                padding: "8px 14px",
                 borderRadius: "20px",
                 fontSize: "11.5px",
-                borderColor: filter === "all" ? "rgba(226, 184, 87, 0.4)" : C.border,
-                background: filter === "all" ? "rgba(226, 184, 87, 0.08)" : "transparent",
+                borderColor: filter === "all" ? "rgba(245, 158, 11, 0.35)" : C.border,
+                background: filter === "all" ? "rgba(245, 158, 11, 0.08)" : "transparent",
                 color: filter === "all" ? C.gold : C.muted,
+                transition: "all 0.2s"
               }}
             >
               All Sources
@@ -325,12 +316,13 @@ export default function DocumentVault({
                 onClick={() => setFilter(c)}
                 className="aegis-btn"
                 style={{
-                  padding: "8px 12px",
+                  padding: "8px 14px",
                   borderRadius: "20px",
                   fontSize: "11.5px",
-                  borderColor: filter === c ? "rgba(226, 184, 87, 0.4)" : C.border,
-                  background: filter === c ? "rgba(226, 184, 87, 0.08)" : "transparent",
+                  borderColor: filter === c ? "rgba(245, 158, 11, 0.35)" : C.border,
+                  background: filter === c ? "rgba(245, 158, 11, 0.08)" : "transparent",
                   color: filter === c ? C.gold : C.muted,
+                  transition: "all 0.2s"
                 }}
               >
                 {categoryInfo(c).label}
@@ -344,12 +336,12 @@ export default function DocumentVault({
       <div className="aegis-scroll" style={{ flex: 1, overflowY: "auto", padding: "0 24px 24px 24px" }}>
         {loading ? (
           <div style={{ display: "flex", alignItems: "center", gap: "10px", color: C.muted, fontSize: "13.5px", marginTop: "40px", justifyContent: "center" }}>
-            <Loader2 size={16} className="aegis-spin" /> Querying active registry catalog…
+            <Loader2 size={16} className="aegis-spin" color={C.gold} /> Querying active registry index…
           </div>
         ) : visibleDocs.length === 0 ? (
-          <div style={{ textAlign: "center", color: C.muted, marginTop: "60px", padding: "20px" }}>
-            <FileSearch size={32} style={{ marginBottom: "12px", opacity: 0.5 }} />
-            <div style={{ fontSize: "13.5px" }}>No document registry records match filters for your role clearance.</div>
+          <div style={{ textAlign: "center", color: C.muted, marginTop: "60px", padding: "20px", border: `1px dashed ${C.border}`, borderRadius: "12px", background: "rgba(255,255,255,0.01)" }}>
+            <FileSearch size={32} style={{ marginBottom: "12px", opacity: 0.5 }} color={C.gold} />
+            <div style={{ fontSize: "13.5px", fontWeight: 500 }}>No document records match filters for your role clearance.</div>
           </div>
         ) : (
           <div className="aegis-table-container">
@@ -357,12 +349,12 @@ export default function DocumentVault({
               className="aegis-table-header"
               style={{
                 display: "grid",
-                gridTemplateColumns: "1.5fr 1.2fr 1fr 100px 90px 100px",
+                gridTemplateColumns: "1.8fr 1.2fr 1fr 100px 90px 100px",
                 padding: "12px 16px",
                 fontSize: "11px",
                 color: C.muted,
                 fontWeight: 600,
-                letterSpacing: "0.05em",
+                letterSpacing: "0.06em",
               }}
             >
               <div>FILE NAME</div>
@@ -382,16 +374,30 @@ export default function DocumentVault({
                   className="aegis-row"
                   style={{
                     display: "grid",
-                    gridTemplateColumns: "1.5fr 1.2fr 1fr 100px 90px 100px",
+                    gridTemplateColumns: "1.8fr 1.2fr 1fr 100px 90px 100px",
                     padding: "12px 16px",
-                    borderTop: `1px solid ${C.borderSoft}`,
+                    borderTop: `1px solid ${C.border}`,
                     fontSize: "13px",
                     alignItems: "center",
+                    transition: "all 0.15s ease",
                   }}
                 >
                   <div style={{ display: "flex", alignItems: "center", gap: "10px", minWidth: 0 }}>
-                    <div style={{ color: C.teal, display: "flex", flexShrink: 0 }}>
-                      <Icon size={16} />
+                    <div
+                      style={{
+                        width: "28px",
+                        height: "28px",
+                        borderRadius: "6px",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        background: "rgba(255,255,255,0.03)",
+                        border: "1px solid rgba(255,255,255,0.06)",
+                        color: C.teal,
+                        flexShrink: 0
+                      }}
+                    >
+                      <Icon size={14} />
                     </div>
                     <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: C.text, fontWeight: 500 }}>
                       {d.name}
@@ -428,15 +434,16 @@ export default function DocumentVault({
                     <button
                       onClick={() => setDeleteDoc(d)}
                       disabled={!isAdmin}
-                      title={isAdmin ? "Delete document" : "Requires Admin privileges"}
+                      title={isAdmin ? "Delete document" : "Requires Administrator privileges"}
                       className="aegis-btn"
                       style={{
                         padding: "6px",
                         background: "transparent",
                         borderColor: C.border,
                         borderRadius: "8px",
-                        color: isAdmin ? C.danger : C.dark,
+                        color: isAdmin ? C.danger : "rgba(255,255,255,0.15)",
                         cursor: isAdmin ? "pointer" : "not-allowed",
+                        opacity: isAdmin ? 1 : 0.4
                       }}
                     >
                       {isAdmin ? <Trash2 size={13} /> : <Lock size={12} />}
