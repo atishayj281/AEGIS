@@ -36,7 +36,7 @@ class ResponseGenerator:
                 0.2,
             )
 
-        if self.settings.openai_api_key:
+        if self.settings.gemini_api_key:
             try:
                 answer, confidence = await self._generate_with_llm(
                     query, context, intent_result, history
@@ -54,36 +54,56 @@ class ResponseGenerator:
         intent_result: IntentResult,
         history: list["ConversationTurn"] | None = None,
     ) -> tuple[str, float]:
-        from openai import AsyncOpenAI
+        import httpx
 
-        client = AsyncOpenAI(api_key=self.settings.openai_api_key)
-
-        # Build the message list: system + optional prior turns + current query
-        messages: list[dict] = [
-            {"role": "system", "content": self.SYSTEM_PROMPT},
-        ]
-
-        # Inject conversation history as alternating user/assistant messages
+        contents = []
         if history:
             for turn in history:
-                messages.append({"role": turn.role, "content": turn.content})
+                role = "model" if turn.role == "assistant" else "user"
+                contents.append({
+                    "role": role,
+                    "parts": [{"text": turn.content}]
+                })
 
-        # Append the current query with retrieved context
         user_prompt = (
             f"Query: {query}\n\n"
             f"Intent: {intent_result.intent.value}\n\n"
             f"Context:\n{context.combined_context}\n\n"
             "Provide a concise, grounded answer with bullet points where appropriate."
         )
-        messages.append({"role": "user", "content": user_prompt})
+        contents.append({
+            "role": "user",
+            "parts": [{"text": user_prompt}]
+        })
 
-        response = await client.chat.completions.create(
-            model=self.settings.openai_model,
-            messages=messages,
-            temperature=0.1,
-            max_tokens=800,
-        )
-        answer = response.choices[0].message.content or ""
+        payload = {
+            "contents": contents,
+            "systemInstruction": {
+                "parts": [{"text": self.SYSTEM_PROMPT}]
+            },
+            "generationConfig": {
+                "temperature": 0.1,
+                "maxOutputTokens": 800
+            }
+        }
+
+        model_name = self.settings.gemini_model
+        if model_name.startswith("models/"):
+            model_name = model_name[len("models/"):]
+
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={self.settings.gemini_api_key}"
+        headers = {"Content-Type": "application/json"}
+
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            response = await client.post(url, json=payload, headers=headers)
+            response.raise_for_status()
+            response_json = response.json()
+
+        try:
+            answer = response_json["candidates"][0]["content"]["parts"][0]["text"]
+        except (KeyError, IndexError):
+            raise ValueError(f"Unexpected response structure from Gemini API: {response_json}")
+
         confidence = min(0.95, intent_result.confidence + 0.1)
         return answer, confidence
 

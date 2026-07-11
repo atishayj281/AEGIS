@@ -27,11 +27,9 @@ physically removing rows, to preserve audit trail and FK integrity with
 documents / conversations. Hard delete (cascade) is a future operation
 that requires explicit ?force=true and is not implemented here.
 
-Auth0 sync: user rows are written only to the local Postgres `users` table.
-The Auth0 Management API (M2M) is NOT called here because AUTH0_M2M_CLIENT_ID
-/ AUTH0_M2M_CLIENT_SECRET are blank in the default dev env. A provisioned user
-won't be able to log in until the corresponding Auth0 account is created;
-the platform admin must do that out-of-band (or via Auth0 dashboard) in dev.
+Auth0 sync: user rows are created in both Auth0 and local Postgres.
+The Auth0 API call is performed first. If it succeeds but the local Postgres
+insert fails, a compensating call is made to rollback the created user.
 """
 
 from __future__ import annotations
@@ -46,6 +44,8 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_platform_admin_db
+from app.auth import auth0_management
+from app.models.provisioning import VALID_ROLES as _VALID_ROLES, UserRecord, TeamRecord
 
 router = APIRouter(prefix="/api/v1/platform", tags=["platform-admin"])
 
@@ -122,23 +122,7 @@ class UpdateOrgRequest(BaseModel):
     retention_days: int | None = Field(default=None, ge=1, le=3650)
 
 
-class UserRecord(BaseModel):
-    id: uuid.UUID
-    org_id: uuid.UUID
-    auth0_sub: str
-    email: str
-    display_name: str | None
-    is_active: bool
-    created_at: str | None
-
-
 class CreateUserRequest(BaseModel):
-    auth0_sub: str = Field(
-        ...,
-        min_length=5,
-        max_length=255,
-        description="Auth0 subject identifier, e.g. 'auth0|abc123'.",
-    )
     email: str = Field(..., min_length=5, max_length=320)
     display_name: str | None = Field(default=None, max_length=255)
 
@@ -146,6 +130,10 @@ class CreateUserRequest(BaseModel):
 class UpdateUserRequest(BaseModel):
     display_name: str | None = Field(default=None, max_length=255)
     is_active: bool | None = None
+    role: str | None = Field(
+        default=None,
+        description=f"New RBAC role. Must be one of: {sorted(_VALID_ROLES)}",
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -252,8 +240,11 @@ async def list_org_users(
 
     result = await db.execute(
         text(
-            "SELECT id, org_id, auth0_sub, email, display_name, is_active, created_at "
-            "FROM users WHERE org_id = :org_id ORDER BY email"
+            "SELECT u.id, u.org_id, u.auth0_sub, u.email, u.display_name, u.is_active, u.created_at, "
+            "   (SELECT tm.role FROM team_memberships tm "
+            "    WHERE tm.user_id = u.id "
+            "    ORDER BY tm.created_at DESC NULLS LAST LIMIT 1) AS role "
+            "FROM users u WHERE u.org_id = :org_id ORDER BY u.email"
         ),
         {"org_id": str(org_id)},
     )
@@ -267,6 +258,7 @@ async def list_org_users(
             display_name=row[4],
             is_active=row[5],
             created_at=row[6].isoformat() if row[6] else None,
+            role=row[7],
         )
         for row in rows
     ]
@@ -315,6 +307,19 @@ async def create_org(
         {"name": body.name, "slug": slug, "retention_days": body.retention_days},
     )
     row = result.fetchone()
+
+    # Auto-create the reserved org-wide default team so that role assignments
+    # on users with no other team memberships have a team_id to attach to.
+    # This insert is intentionally NOT guarded by a try/except: if it fails,
+    # the org insert and this team insert share the same session/transaction
+    # and will both be rolled back, surfacing a 500.  Silently swallowing a
+    # failure here would leave the org without its required default team,
+    # which is a worse outcome than a loud error.
+    await db.execute(
+        text("INSERT INTO teams (org_id, name) VALUES (:org_id, :name)"),
+        {"org_id": str(row[0]), "name": "_org_default"},
+    )
+
     return OrgSummary(
         id=row[0],
         name=row[1],
@@ -427,35 +432,75 @@ async def create_user(
     if org_check.fetchone() is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Organization {org_id} not found")
 
-    # Uniqueness check on auth0_sub.
-    sub_check = await db.execute(
-        text("SELECT id FROM users WHERE auth0_sub = :sub"),
-        {"sub": body.auth0_sub},
+    # Uniqueness check on email locally first.
+    email_check = await db.execute(
+        text("SELECT id FROM users WHERE email = :email"),
+        {"email": body.email},
     )
-    if sub_check.fetchone():
+    if email_check.fetchone():
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail=f"A user with auth0_sub '{body.auth0_sub}' already exists.",
+            detail=f"A user with email '{body.email}' already exists.",
         )
 
-    result = await db.execute(
+    # Call Auth0 first
+    try:
+        auth0_user = await auth0_management.create_auth0_user(
+            email=body.email,
+            org_id=str(org_id),
+            roles={},
+            display_name=body.display_name,
+        )
+        auth0_sub = auth0_user["user_id"]
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(exc),
+        ) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Auth0 user creation failed: {exc}",
+        ) from exc
+
+    # Insert into Postgres with rollback on failure
+    try:
+        result = await db.execute(
+            text(
+                "INSERT INTO users (org_id, auth0_sub, email, display_name) "
+                "VALUES (:org_id, :auth0_sub, :email, :display_name) "
+                "RETURNING id, org_id, auth0_sub, email, display_name, is_active, created_at"
+            ),
+            {
+                "org_id": str(org_id),
+                "auth0_sub": auth0_sub,
+                "email": body.email,
+                "display_name": body.display_name,
+            },
+        )
+        row = result.fetchone()
+    except Exception as pg_exc:
+        await auth0_management.rollback_created_user(auth0_sub)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Database insert failed: {pg_exc}",
+        ) from pg_exc
+
+    # Resolve the role from the first team_membership for this user (if any).
+    role_row = await db.execute(
         text(
-            "INSERT INTO users (org_id, auth0_sub, email, display_name) "
-            "VALUES (:org_id, :auth0_sub, :email, :display_name) "
-            "RETURNING id, org_id, auth0_sub, email, display_name, is_active, created_at"
+            "SELECT tm.role FROM team_memberships tm "
+            "WHERE tm.user_id = :user_id "
+            "ORDER BY tm.created_at DESC NULLS LAST LIMIT 1"
         ),
-        {
-            "org_id": str(org_id),
-            "auth0_sub": body.auth0_sub,
-            "email": body.email,
-            "display_name": body.display_name,
-        },
+        {"user_id": str(row[0])},
     )
-    row = result.fetchone()
+    role_val = role_row.scalar()
     return UserRecord(
         id=row[0], org_id=row[1], auth0_sub=row[2], email=row[3],
         display_name=row[4], is_active=row[5],
         created_at=row[6].isoformat() if row[6] else None,
+        role=role_val,
     )
 
 
@@ -470,36 +515,168 @@ async def update_user(
     body: UpdateUserRequest,
     db: AsyncSession = Depends(get_platform_admin_db),
 ) -> UserRecord:
-    """Partial-update a user's display_name or is_active status."""
-    updates: dict[str, object] = {}
-    if body.display_name is not None:
-        updates["display_name"] = body.display_name
-    if body.is_active is not None:
-        updates["is_active"] = body.is_active
+    """Partial-update a user's display_name, is_active status, or role.
 
-    if not updates:
+    Role changes update every active team_memberships row for the user within
+    the org AND patch Auth0 app_metadata so the next JWT issued by Auth0 will
+    carry the new role claim.  Auth0 is synced first; a Postgres failure will
+    attempt to restore the previous Auth0 metadata (best-effort rollback).
+    """
+    # ── Validate role if supplied ─────────────────────────────────────────────
+    if body.role is not None and body.role not in _VALID_ROLES:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Invalid role {body.role!r}. Valid roles: {sorted(_VALID_ROLES)}",
+        )
+
+    users_updates: dict[str, object] = {}
+    if body.display_name is not None:
+        users_updates["display_name"] = body.display_name
+    if body.is_active is not None:
+        users_updates["is_active"] = body.is_active
+
+    if not users_updates and body.role is None:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="No fields to update.")
 
-    set_clause = ", ".join(f"{col} = :{col}" for col in updates)
-    params = dict(updates)
-    params["user_id"] = str(user_id)
-    params["org_id"] = str(org_id)
-
-    result = await db.execute(
+    # ── Look up current user row (need auth0_sub for Auth0 sync) ─────────────
+    existing = await db.execute(
         text(
-            f"UPDATE users SET {set_clause}, updated_at = now() "
-            f"WHERE id = :user_id AND org_id = :org_id "
-            f"RETURNING id, org_id, auth0_sub, email, display_name, is_active, created_at"
+            "SELECT id, org_id, auth0_sub, email, display_name, is_active, created_at "
+            "FROM users WHERE id = :user_id AND org_id = :org_id"
         ),
-        params,
+        {"user_id": str(user_id), "org_id": str(org_id)},
     )
-    row = result.fetchone()
+    row = existing.fetchone()
     if row is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"User {user_id} not found in org {org_id}")
+    
+    auth0_sub: str = row[2]
+    previous_metadata: dict | None = None
+    # Tracks whether we need INSERT (zero existing memberships) vs UPDATE.
+    _default_team_id: str | None = None
+
+    # ── Step 1: Auth0 role sync (only when role is changing) ─────────────────
+    if body.role is not None:
+        # Fetch current team_memberships to build the updated roles dict.
+        memberships = await db.execute(
+            text(
+                "SELECT team_id, role FROM team_memberships "
+                "WHERE user_id = :user_id AND org_id = :org_id"
+            ),
+            {"user_id": str(user_id), "org_id": str(org_id)},
+        )
+        membership_rows = memberships.fetchall()
+
+        if membership_rows:
+            # Normal case: build roles dict from all existing memberships.
+            new_roles_dict = {str(r[0]): body.role for r in membership_rows}
+        else:
+            # Zero-memberships case: look up the org's reserved default team
+            # and plan an INSERT rather than an UPDATE in Step 2.
+            default_team = await db.execute(
+                text("SELECT id FROM teams WHERE org_id = :org_id AND name = '_org_default'"),
+                {"org_id": str(org_id)},
+            )
+            default_team_row = default_team.fetchone()
+            if default_team_row is None:
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail=(
+                        f"Organization {org_id} has no default team. This indicates "
+                        "the org was created before default-team provisioning was "
+                        "added, or the default team was deleted. "
+                        "Run scripts/backfill_default_teams.py to repair, or contact support."
+                    ),
+                )
+            _default_team_id = str(default_team_row[0])
+            new_roles_dict = {_default_team_id: body.role}
+
+        try:
+            previous_metadata = await auth0_management.sync_existing_user(
+                auth0_sub=auth0_sub,
+                org_id=str(org_id),
+                roles=new_roles_dict,
+            )
+        except Exception as exc:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=f"Auth0 metadata sync failed: {exc}",
+            ) from exc
+
+    # ── Step 2: Postgres updates ──────────────────────────────────────────────
+    try:
+        # Update users table fields (display_name / is_active)
+        if users_updates:
+            set_clause = ", ".join(f"{col} = :{col}" for col in users_updates)
+            params = dict(users_updates)
+            params["user_id"] = str(user_id)
+            params["org_id"] = str(org_id)
+            result = await db.execute(
+                text(
+                    f"UPDATE users SET {set_clause}, updated_at = now() "
+                    f"WHERE id = :user_id AND org_id = :org_id "
+                    f"RETURNING id, org_id, auth0_sub, email, display_name, is_active, created_at"
+                ),
+                params,
+            )
+            row = result.fetchone()
+
+        # Apply team_memberships role change.
+        if body.role is not None:
+            if _default_team_id is not None:
+                # User had zero memberships — INSERT a new row onto the
+                # org's _org_default team.  uq_team_memberships_team_id_user_id
+                # enforces uniqueness; a conflict here is a real concurrency
+                # bug and is intentionally allowed to surface as a 500 so the
+                # existing Auth0 rollback in the except block fires correctly.
+                await db.execute(
+                    text(
+                        "INSERT INTO team_memberships (org_id, team_id, user_id, role) "
+                        "VALUES (:org_id, :team_id, :user_id, :role)"
+                    ),
+                    {
+                        "org_id": str(org_id),
+                        "team_id": _default_team_id,
+                        "user_id": str(user_id),
+                        "role": body.role,
+                    },
+                )
+            else:
+                # Normal case: UPDATE all existing memberships to the new role.
+                await db.execute(
+                    text(
+                        "UPDATE team_memberships SET role = :role "
+                        "WHERE user_id = :user_id AND org_id = :org_id"
+                    ),
+                    {"role": body.role, "user_id": str(user_id), "org_id": str(org_id)},
+                )
+    except Exception as pg_exc:
+        # Attempt to restore previous Auth0 metadata if we already synced it.
+        if previous_metadata is not None:
+            await auth0_management.rollback_synced_user(auth0_sub, previous_metadata)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Database update failed: {pg_exc}",
+        ) from pg_exc
+
+    # If only role changed (no users_updates), `row` still points to the original
+    # SELECT result which is fine — display_name/is_active didn't change.
+    # Re-fetch the final role from team_memberships for the response.
+    role_row = await db.execute(
+        text(
+            "SELECT tm.role FROM team_memberships tm "
+            "WHERE tm.user_id = :user_id "
+            "ORDER BY tm.created_at DESC NULLS LAST LIMIT 1"
+        ),
+        {"user_id": str(user_id)},
+    )
+    final_role = role_row.scalar()
+
     return UserRecord(
         id=row[0], org_id=row[1], auth0_sub=row[2], email=row[3],
         display_name=row[4], is_active=row[5],
         created_at=row[6].isoformat() if row[6] else None,
+        role=final_role,
     )
 
 

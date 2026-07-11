@@ -208,6 +208,31 @@ Permissions are resolved dynamically based on the active team context:
 
 ---
 
+## Self-Service Org Provisioning
+
+The platform supports self-service user/team provisioning and role assignment scoped strictly to an organization. Callers who are `org_admin` or `team_lead` can manage directory access for their teams using the `/api/v1/org` router.
+
+### Org Provisioning Endpoints
+
+- **`POST /api/v1/org/teams`** — Create a team within the organization (gated to `org_admin`).
+- **`POST /api/v1/org/users`** — Provision a new user. The backend automatically resolves `org_id` from the caller's JWT token:
+  - `org_admin` can provision users to any team. If no team is specified, they attach to the organization's reserved `_org_default` team.
+  - `team_lead` can only provision users into teams they lead.
+  - Reject attempts to grant `org_admin` role (requires platform admin).
+- **`PATCH /api/v1/org/users/{user_id}`** — Partial-update user name, active status, or role (except `org_admin`).
+- **`DELETE /api/v1/org/users/{user_id}`** — Soft deactivate a user.
+
+### Backfilling Pre-existing Organizations
+
+Every organization created after this release has an `_org_default` team automatically provisioned. For pre-existing organizations, run the backfill script:
+
+```bash
+DATABASE_URL=postgresql+asyncpg://user:pass@host/dbname \
+    python -m scripts.backfill_default_teams
+```
+
+---
+
 ## Project Structure
 
 ```text

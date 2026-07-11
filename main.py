@@ -8,6 +8,7 @@ from app.api.routes import router
 from app.api.admin import admin_router
 from app.api.platform_admin import router as platform_admin_router
 from app.api.login import router as login_router
+from app.api.org_admin import router as org_admin_router
 from app.config import get_settings
 from app.retrieval.vector_store import VectorStore
 from app.security.headers import SecurityHeadersMiddleware
@@ -46,6 +47,7 @@ app.include_router(router, prefix="/api/v1", tags=["RAG"])
 app.include_router(admin_router, prefix="/admin", tags=["Admin — User Provisioning"])
 app.include_router(platform_admin_router, tags=["Platform Admin (superuser)"])
 app.include_router(login_router, prefix="/api/v1", tags=["Identity"])
+app.include_router(org_admin_router, tags=["Org Admin — Self-service Provisioning"])
 
 
 
