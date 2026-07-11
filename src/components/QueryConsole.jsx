@@ -1,5 +1,5 @@
-import React, { useState, useRef, useEffect } from "react";
-import { Send, Sparkles, Loader2, AlertTriangle, ShieldOff, Lock, FileText, CheckCircle2 } from "lucide-react";
+import React, { useState, useRef, useEffect, useCallback } from "react";
+import { Send, Sparkles, Loader2, AlertTriangle, ShieldOff, Lock, FileText, CheckCircle2, MessageSquarePlus, MessageSquare, PanelLeftClose, PanelLeft, Trash2 } from "lucide-react";
 import { C, categoryInfo, ConfidenceBar, maskSensitive, ROLES, INJECTION_PATTERN } from "./SmallComponents";
 
 const DEFAULT_QUERY_RULES = [
@@ -101,14 +101,14 @@ const DEFAULT_QUERY_RULE = {
 };
 
 const fallbackApiClient = {
-  query: async (apiBase, token, queryText) => {
+  query: async (apiBase, token, queryText, sessionId = null) => {
     const res = await fetch(`${apiBase}/api/v1/query`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         ...(token ? { Authorization: `Bearer ${token}` } : {})
       },
-      body: JSON.stringify({ query: queryText })
+      body: JSON.stringify({ query: queryText, session_id: sessionId })
     });
     if (!res.ok) {
       let msg = `Request failed (${res.status})`;
@@ -121,7 +121,10 @@ const fallbackApiClient = {
       throw err;
     }
     return res.json();
-  }
+  },
+  listSessions: async () => [],
+  getSession: async () => ({ session_id: "demo", turns: [] }),
+  deleteSession: async () => ({})
 };
 
 export default function QueryConsole({
@@ -143,6 +146,64 @@ export default function QueryConsole({
   const scrollRef = useRef(null);
   const role = ROLES[roleKey] || ROLES.employee;
 
+  // -- Session State --
+  const [sessionId, setSessionId] = useState(null);
+  const [sessions, setSessions] = useState([]);
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+
+  const fetchSessions = useCallback(async () => {
+    if (!live || !token) return;
+    try {
+      const data = await apiClient.listSessions(apiBase, token);
+      setSessions(Array.isArray(data) ? data : []);
+    } catch (e) {
+      console.error("Failed to fetch sessions", e);
+    }
+  }, [live, token, apiBase, apiClient]);
+
+  useEffect(() => {
+    fetchSessions();
+  }, [fetchSessions]);
+
+  const handleLoadSession = async (id) => {
+    if (!live || !token) return;
+    try {
+      const data = await apiClient.getSession(apiBase, token, id);
+      setSessionId(data.session_id);
+      const mapped = (data.turns || []).map((t, i) => ({
+        id: `hist-${i}`,
+        role: t.role === "user" ? "user" : "assistant",
+        type: t.role === "user" ? undefined : "answer",
+        text: t.content,
+        answer: t.role === "user" ? undefined : t.content,
+        citations: [],
+        category: "general"
+      }));
+      setMessages(mapped);
+    } catch (e) {
+      console.error("Failed to load session", e);
+    }
+  };
+
+  const handleDeleteSession = async (id, e) => {
+    e.stopPropagation();
+    if (!live || !token) return;
+    try {
+      await apiClient.deleteSession(apiBase, token, id);
+      if (sessionId === id) {
+        setSessionId(null);
+        setMessages([]);
+      }
+      fetchSessions();
+    } catch (err) {
+      console.error("Failed to delete session", err);
+    }
+  };
+
+  const handleNewChat = () => {
+    setSessionId(null);
+    setMessages([]);
+  };
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -168,12 +229,15 @@ export default function QueryConsole({
     setLoading(true);
 
     const loadingId = Date.now() + 1;
-    // Add temporary loading indicator
     setMessages((prev) => [...prev, { id: loadingId, role: "assistant", type: "loading" }]);
 
     if (live) {
       try {
-        const data = await apiClient.query(apiBase, token, query);
+        const data = await apiClient.query(apiBase, token, query, sessionId);
+        if (data.session_id && data.session_id !== sessionId) {
+          setSessionId(data.session_id);
+          fetchSessions();
+        }
         
         // Handle Security Violation (Prompt Injection)
         if (data.blocked || data.violation_type) {
@@ -246,7 +310,6 @@ export default function QueryConsole({
         let errMsg = err.message || "An unexpected error occurred.";
         let errCat = null;
         
-        // Backup checks for errors from API client status
         if (err.status === 403) {
           errType = "denied";
           errMsg = err.message || "Access Denied: Restricted clearance resource.";
@@ -277,9 +340,8 @@ export default function QueryConsole({
       return;
     }
 
-    // ---- sandbox offline demo mode (local rule simulation) ----
+    // ---- sandbox offline demo mode ----
     setTimeout(() => {
-      // Simulate Prompt Injection guard
       if (INJECTION_PATTERN.test(query)) {
         const reply = { id: loadingId, role: "assistant", type: "blocked" };
         setMessages((prev) => prev.map((m) => (m.id === loadingId ? reply : m)));
@@ -336,305 +398,410 @@ export default function QueryConsole({
   };
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
-      {/* Scrollable messages container */}
-      <div
-        ref={scrollRef}
-        className="aegis-scroll"
-        style={{
-          flex: 1,
-          overflowY: "auto",
-          padding: "24px 24px 10px 24px",
-          display: "flex",
-          flexDirection: "column",
-          gap: "16px",
-        }}
-      >
-        {messages.length === 0 && (
-          <div style={{ textAlign: "center", marginTop: "40px", padding: "0 20px" }} className="aegis-fade-in">
-            <Sparkles size={36} color={C.gold} style={{ marginBottom: "16px", filter: "drop-shadow(0 0 10px var(--color-gold-glow))" }} />
-            <h2 className="aegis-display" style={{ fontSize: "20px", fontWeight: 700, color: C.text, marginBottom: "8px" }}>
-              Secure RAG Assistant Console
-            </h2>
-            <p style={{ fontSize: "13px", color: C.muted, marginBottom: "24px", maxWidth: "480px", margin: "0 auto 24px" }}>
-              Ask plain English questions. Responses are strictly grounded in retrieved sources and limited to authorization clearances for:{" "}
-              <span className="aegis-mono" style={{ color: role.accent, fontWeight: 600 }}>{role.label}</span>.
-            </p>
-            <div className="aegis-suggestion-grid">
-              {suggestions.map((s) => (
-                <button
-                  key={s}
-                  className="aegis-btn"
-                  onClick={() => handleSend(s)}
-                  disabled={loading}
-                  style={{
-                    textAlign: "left",
-                    padding: "12px",
-                    background: C.panel,
-                    borderColor: C.border,
-                    fontSize: "12.5px",
-                    fontWeight: 500,
-                    lineHeight: "1.4",
-                    borderRadius: "10px",
-                  }}
-                >
-                  {s}
-                </button>
-              ))}
-            </div>
+    <div style={{ display: "flex", height: "100%", overflow: "hidden" }}>
+      {/* ── SIDEBAR ── */}
+      {sidebarOpen && (
+        <div
+          style={{
+            width: "260px",
+            borderRight: `1px solid ${C.border}`,
+            background: "rgba(10, 15, 30, 0.45)",
+            backdropFilter: "blur(12px)",
+            WebkitBackdropFilter: "blur(12px)",
+            display: "flex",
+            flexDirection: "column",
+            flexShrink: 0,
+            transition: "width 0.2s"
+          }}
+        >
+          <div style={{ padding: "16px" }}>
+            <button
+              onClick={handleNewChat}
+              className="aegis-btn aegis-btn-primary"
+              style={{ width: "100%", padding: "10px", display: "flex", alignItems: "center", justifyContent: "center", gap: "8px", borderRadius: "10px" }}
+            >
+              <MessageSquarePlus size={15} />
+              <span>New Chat</span>
+            </button>
           </div>
-        )}
-
-        {messages.map((m) => {
-          if (m.role === "user") {
-            return (
-              <div key={m.id} className="aegis-fade-in" style={{ display: "flex", justifyContent: "flex-end" }}>
-                <div
-                  style={{
-                    maxWidth: "75%",
-                    background: C.panel2,
-                    border: `1px solid ${C.border}`,
-                    borderRadius: "12px 12px 2px 12px",
-                    padding: "12px 16px",
-                    fontSize: "13.5px",
-                    color: C.text,
-                    boxShadow: "var(--shadow-sm)",
-                  }}
-                >
-                  {m.text}
-                </div>
+          <div style={{ padding: "8px 16px", fontSize: "11px", fontWeight: 600, color: C.muted, textTransform: "uppercase", letterSpacing: "0.06em" }}>
+            Recent Sessions
+          </div>
+          <div className="aegis-scroll" style={{ flex: 1, overflowY: "auto", padding: "0 8px 16px 8px" }}>
+            {sessions.length === 0 ? (
+              <div style={{ padding: "16px", textAlign: "center", color: C.muted, fontSize: "12px", fontStyle: "italic" }}>
+                No active sessions
               </div>
-            );
-          }
-
-          if (m.type === "loading") {
-            return (
-              <div key={m.id} className="aegis-fade-in" style={{ display: "flex", justifyContent: "flex-start" }}>
+            ) : (
+              sessions.map(s => (
                 <div
+                  key={s.session_id}
+                  onClick={() => handleLoadSession(s.session_id)}
+                  className="aegis-btn"
                   style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: "10px",
-                    background: C.panel,
-                    border: `1px solid ${C.border}`,
-                    borderRadius: "2px 12px 12px 12px",
-                    padding: "12px 18px",
-                    color: C.muted,
-                    fontSize: "13px",
+                    display: "flex", alignItems: "center", justifyContent: "space-between",
+                    padding: "9px 12px", margin: "4px", borderRadius: "8px",
+                    background: sessionId === s.session_id ? "rgba(255, 255, 255, 0.05)" : "transparent",
+                    color: sessionId === s.session_id ? C.text : C.muted,
+                    border: sessionId === s.session_id ? `1px solid rgba(255,255,255,0.08)` : "1px solid transparent",
+                    cursor: "pointer", fontSize: "12.5px", transition: "all 0.15s ease",
+                    textAlign: "left"
                   }}
                 >
-                  <Loader2 size={15} className="aegis-spin" /> Performing semantic search & compiling claims…
-                </div>
-              </div>
-            );
-          }
-
-          if (m.type === "error") {
-            return (
-              <div key={m.id} className="aegis-fade-in" style={{ display: "flex", justifyContent: "flex-start" }}>
-                <div
-                  style={{
-                    maxWidth: "80%",
-                    background: "rgba(239, 68, 68, 0.08)",
-                    border: `1px solid rgba(239, 68, 68, 0.3)`,
-                    borderRadius: "2px 12px 12px 12px",
-                    padding: "14px 18px",
-                  }}
-                >
-                  <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "6px" }}>
-                    <AlertTriangle size={16} color={C.danger} />
-                    <span className="aegis-mono" style={{ fontSize: "11px", fontWeight: 700, color: C.danger, letterSpacing: "0.06em" }}>
-                      REQUEST EXCEPTION
+                  <div style={{ display: "flex", alignItems: "center", gap: "8px", overflow: "hidden", width: "80%" }}>
+                    <MessageSquare size={13} style={{ flexShrink: 0 }} color={sessionId === s.session_id ? C.gold : C.muted} />
+                    <span style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                      {s.turns?.[0]?.content || "Empty Session"}
                     </span>
                   </div>
-                  <div style={{ fontSize: "13px", color: C.text }}>{m.text}</div>
+                  <button
+                    onClick={(e) => handleDeleteSession(s.session_id, e)}
+                    className="aegis-btn"
+                    style={{ padding: "4px", color: C.danger, border: "none", background: "transparent" }}
+                  >
+                    <Trash2 size={12} />
+                  </button>
                 </div>
-              </div>
-            );
-          }
+              ))
+            )}
+          </div>
+        </div>
+      )}
 
-          if (m.type === "blocked") {
-            return (
-              <div key={m.id} className="aegis-fade-in" style={{ display: "flex", justifyContent: "flex-start" }}>
-                <div
-                  style={{
-                    maxWidth: "80%",
-                    background: "rgba(239, 68, 68, 0.08)",
-                    border: `1px solid rgba(239, 68, 68, 0.4)`,
-                    borderRadius: "2px 12px 12px 12px",
-                    padding: "16px 18px",
-                  }}
-                >
-                  <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "8px" }}>
-                    <ShieldOff size={16} color={C.danger} />
-                    <span className="aegis-mono" style={{ fontSize: "11.5px", fontWeight: 700, color: C.danger, letterSpacing: "0.06em" }}>
-                      PROMPT INJECTION BLOCK
-                    </span>
-                  </div>
-                  <div style={{ fontSize: "13px", color: C.text, lineHeight: "1.5" }}>
-                    {m.text || "Security violation: This user input matches dangerous prompt injection signatures and was blocked before indexing any backend storage. The event has been audited."}
+      {/* ── MAIN CHAT AREA ── */}
+      <div style={{ flex: 1, display: "flex", flexDirection: "column", position: "relative", minWidth: 0 }}>
+        <button
+          onClick={() => setSidebarOpen(!sidebarOpen)}
+          className="aegis-btn"
+          style={{
+            position: "absolute",
+            top: "16px",
+            left: "16px",
+            zIndex: 10,
+            padding: "8px",
+            background: "rgba(15, 23, 42, 0.6)",
+            border: `1px solid ${C.border}`,
+            borderRadius: "8px",
+            color: C.muted,
+            backdropFilter: "blur(6px)"
+          }}
+        >
+          {sidebarOpen ? <PanelLeftClose size={15} /> : <PanelLeft size={15} />}
+        </button>
+
+        {/* Scrollable messages container */}
+        <div
+          ref={scrollRef}
+          className="aegis-scroll"
+          style={{
+            flex: 1,
+            overflowY: "auto",
+            padding: "32px 32px 10px 32px",
+            display: "flex",
+            flexDirection: "column",
+            gap: "20px",
+          }}
+        >
+          {messages.length === 0 && (
+            <div style={{ textAlign: "center", marginTop: "60px", padding: "0 20px" }} className="aegis-fade-in">
+              <Sparkles size={38} color={C.gold} style={{ marginBottom: "16px", filter: "drop-shadow(0 0 12px rgba(245,158,11,0.3))" }} />
+              <h2 className="aegis-display" style={{ fontSize: "21px", fontWeight: 700, color: C.text, marginBottom: "8px" }}>
+                Secure RAG Assistant Console
+              </h2>
+              <p style={{ fontSize: "13px", color: C.muted, marginBottom: "28px", maxWidth: "480px", margin: "0 auto 28px", lineHeight: 1.5 }}>
+                Enter search query queries. Answers are strictly verified and compiled based on source clearances for role:{" "}
+                <span className="aegis-mono" style={{ color: role.accent, fontWeight: 600 }}>{role.label}</span>.
+              </p>
+              
+              <div className="aegis-suggestion-grid">
+                {suggestions.map((s) => (
+                  <button
+                    key={s}
+                    className="aegis-btn aegis-glass-card"
+                    onClick={() => handleSend(s)}
+                    disabled={loading}
+                    style={{
+                      textAlign: "left",
+                      padding: "14px",
+                      fontSize: "12.5px",
+                      lineHeight: "1.4",
+                      borderRadius: "12px",
+                      cursor: "pointer",
+                      display: "block",
+                      width: "100%"
+                    }}
+                  >
+                    {s}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {messages.map((m) => {
+            if (m.role === "user") {
+              return (
+                <div key={m.id} className="aegis-fade-in" style={{ display: "flex", justifyContent: "flex-end" }}>
+                  <div
+                    style={{
+                      maxWidth: "75%",
+                      background: "rgba(99, 102, 241, 0.12)",
+                      border: `1px solid rgba(99, 102, 241, 0.28)`,
+                      borderRadius: "14px 14px 2px 14px",
+                      padding: "12px 16px",
+                      fontSize: "13.5px",
+                      color: C.text,
+                      boxShadow: "0 4px 12px rgba(99, 102, 241, 0.05)",
+                    }}
+                  >
+                    {m.text}
                   </div>
                 </div>
-              </div>
-            );
-          }
+              );
+            }
 
-          if (m.type === "denied") {
+            if (m.type === "loading") {
+              return (
+                <div key={m.id} className="aegis-fade-in" style={{ display: "flex", justifyContent: "flex-start" }}>
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "10px",
+                      background: "rgba(255, 255, 255, 0.02)",
+                      border: `1px solid ${C.border}`,
+                      borderRadius: "2px 14px 14px 14px",
+                      padding: "12px 18px",
+                      color: C.muted,
+                      fontSize: "13px",
+                      backdropFilter: "blur(6px)",
+                    }}
+                  >
+                    <Loader2 size={14} className="aegis-spin" color={C.gold} /> Grounding references & indexing vectors…
+                  </div>
+                </div>
+              );
+            }
+
+            if (m.type === "error") {
+              return (
+                <div key={m.id} className="aegis-fade-in" style={{ display: "flex", justifyContent: "flex-start" }}>
+                  <div
+                    style={{
+                      maxWidth: "80%",
+                      background: "rgba(244, 63, 94, 0.08)",
+                      border: `1px solid rgba(244, 63, 94, 0.25)`,
+                      borderRadius: "2px 14px 14px 14px",
+                      padding: "14px 18px",
+                    }}
+                  >
+                    <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "6px" }}>
+                      <AlertTriangle size={15} color={C.danger} />
+                      <span className="aegis-mono" style={{ fontSize: "10.5px", fontWeight: 700, color: C.danger, letterSpacing: "0.06em" }}>
+                        REQUEST COMPONENT EXCEPTION
+                      </span>
+                    </div>
+                    <div style={{ fontSize: "13px", color: C.text }}>{m.text}</div>
+                  </div>
+                </div>
+              );
+            }
+
+            if (m.type === "blocked") {
+              return (
+                <div key={m.id} className="aegis-fade-in" style={{ display: "flex", justifyContent: "flex-start" }}>
+                  <div
+                    style={{
+                      maxWidth: "80%",
+                      background: "rgba(244, 63, 94, 0.08)",
+                      border: `1px solid rgba(244, 63, 94, 0.35)`,
+                      borderRadius: "2px 14px 14px 14px",
+                      padding: "16px 18px",
+                      boxShadow: "0 8px 24px rgba(244, 63, 94, 0.1)",
+                    }}
+                  >
+                    <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "8px" }}>
+                      <ShieldOff size={16} color={C.danger} />
+                      <span className="aegis-mono" style={{ fontSize: "11px", fontWeight: 700, color: C.danger, letterSpacing: "0.06em" }}>
+                        PROMPT INJECTION GATING SHIELD
+                      </span>
+                    </div>
+                    <div style={{ fontSize: "13px", color: C.text, lineHeight: "1.5" }}>
+                      {m.text || "Security boundary violation: Input matches malicious instruction overrides. The event has been appended to the audit logging journals."}
+                    </div>
+                  </div>
+                </div>
+              );
+            }
+
+            if (m.type === "denied") {
+              const cat = categoryInfo(m.category);
+              return (
+                <div key={m.id} className="aegis-fade-in" style={{ display: "flex", justifyContent: "flex-start" }}>
+                  <div
+                    className="aegis-ticket"
+                    style={{
+                      maxWidth: "80%",
+                      background: "rgba(245, 158, 11, 0.05)",
+                      border: `1px solid rgba(245, 158, 11, 0.3)`,
+                      borderRadius: "2px 14px 14px 14px",
+                      padding: "16px 18px",
+                      boxShadow: "0 8px 24px rgba(245, 158, 11, 0.05)",
+                    }}
+                  >
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "10px" }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                        <Lock size={14} color={C.gold} />
+                        <span className="aegis-mono" style={{ fontSize: "10.5px", fontWeight: 700, color: C.gold, letterSpacing: "0.06em" }}>
+                          ACCESS DENIED
+                        </span>
+                      </div>
+                      <div className="aegis-stamp" style={{ border: `1.5px solid ${C.gold}`, color: C.gold, borderRadius: "4px", padding: "1px 6px", fontSize: "9px", fontWeight: 700, letterSpacing: "0.05em" }}>
+                        RESTRICTED
+                      </div>
+                    </div>
+                    <div style={{ fontSize: "13px", color: C.text, lineHeight: "1.5" }}>
+                      {m.text || (
+                        <>
+                          Clearance Error: Your role does not hold credentials to retrieve database category{" "}
+                          <strong>{cat.label}</strong> [{cat.classification}].
+                        </>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              );
+            }
+
+            // Grounded Verified Response Card
             const cat = categoryInfo(m.category);
             return (
               <div key={m.id} className="aegis-fade-in" style={{ display: "flex", justifyContent: "flex-start" }}>
                 <div
-                  className="aegis-ticket"
+                  className="aegis-ticket aegis-glass-panel"
                   style={{
-                    maxWidth: "80%",
-                    background: "rgba(239, 68, 68, 0.05)",
-                    border: `1px solid rgba(239, 68, 68, 0.35)`,
-                    borderRadius: "2px 12px 12px 12px",
-                    padding: "16px 18px",
+                    maxWidth: "85%",
+                    padding: "18px 20px",
+                    boxShadow: "0 12px 30px rgba(0, 0, 0, 0.25)",
+                    background: "rgba(15, 23, 42, 0.65)"
                   }}
                 >
-                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "10px" }}>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "12px", flexWrap: "wrap", gap: "8px" }}>
                     <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                      <Lock size={15} color={C.danger} />
-                      <span className="aegis-mono" style={{ fontSize: "11px", fontWeight: 700, color: C.danger, letterSpacing: "0.06em" }}>
-                        ACCESS DENIED
+                      <Sparkles size={14} color={C.gold} />
+                      <span className="aegis-mono" style={{ fontSize: "10.5px", color: C.muted, letterSpacing: "0.08em" }}>
+                        GROUNDED RESOURCE · {cat.label.toUpperCase()}
                       </span>
                     </div>
-                    <div className="aegis-stamp" style={{ border: `1.5px solid ${C.danger}`, color: C.danger, borderRadius: "4px", padding: "1px 6px", fontSize: "9px", fontWeight: 700, letterSpacing: "0.05em" }}>
-                      DENIED
+                    <div className="aegis-stamp" style={{ border: `1.5px solid ${C.success}`, color: C.success, borderRadius: "4px", padding: "1px 6px", fontSize: "9px", fontWeight: 700, letterSpacing: "0.05em" }}>
+                      VERIFIED
                     </div>
                   </div>
-                  <div style={{ fontSize: "13px", color: C.text, lineHeight: "1.5" }}>
-                    {m.text || (
-                      <>
-                        Clearance Error: Your role does not have authorization to search database category{" "}
-                        <strong>{cat.label}</strong> [{cat.classification}].
-                      </>
+
+                  {/* Grounded text output */}
+                  <div style={{ color: C.text, fontSize: "13.5px", lineHeight: "1.6" }}>
+                    {Array.isArray(m.answer) ? (
+                      <ul style={{ margin: 0, paddingLeft: "18px" }}>
+                        {m.answer.map((line, i) => (
+                          <li key={i} style={{ marginBottom: "6px" }}>{maskSensitive(line)}</li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <div style={{ whiteSpace: "pre-wrap" }}>{maskSensitive(m.answer)}</div>
                     )}
                   </div>
+
+                  {/* Citations & Confidence Indicators */}
+                  {((m.citations && m.citations.length > 0) || m.confidence !== undefined) && (
+                    <div
+                      style={{
+                        marginTop: "16px",
+                        borderTop: `1px solid rgba(255, 255, 255, 0.08)`,
+                        paddingTop: "14px",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        flexWrap: "wrap",
+                        gap: "10px",
+                      }}
+                    >
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: "6px" }}>
+                        {(m.citations || []).map((c, i) => (
+                          <span
+                            key={i}
+                            className="aegis-mono"
+                            style={{
+                              display: "inline-flex",
+                              alignItems: "center",
+                              gap: "5px",
+                              fontSize: "10.5px",
+                              padding: "3px 8px",
+                              borderRadius: "6px",
+                              border: `1px solid rgba(255, 255, 255, 0.06)`,
+                              background: "rgba(255, 255, 255, 0.02)",
+                              color: C.muted,
+                            }}
+                          >
+                            <FileText size={10} color={C.teal} /> {c}
+                          </span>
+                        ))}
+                      </div>
+                      {m.confidence !== undefined && (
+                        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                          <span className="aegis-mono" style={{ fontSize: "10px", color: C.muted, letterSpacing: "0.05em" }}>RELEVANCE</span>
+                          <ConfidenceBar score={m.confidence} />
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               </div>
             );
-          }
-
-          // Render Normal Verified Grounded Answer
-          const cat = categoryInfo(m.category);
-          return (
-            <div key={m.id} className="aegis-fade-in" style={{ display: "flex", justifyContent: "flex-start" }}>
-              <div
-                className="aegis-ticket"
-                style={{
-                  maxWidth: "85%",
-                  background: C.panel,
-                  border: `1px solid ${C.border}`,
-                  borderRadius: "2px 12px 12px 12px",
-                  padding: "18px",
-                  boxShadow: "var(--shadow-sm)",
-                }}
-              >
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "12px", flexWrap: "wrap", gap: "8px" }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                    <Sparkles size={14} color={C.gold} />
-                    <span className="aegis-mono" style={{ fontSize: "11px", color: C.muted, letterSpacing: "0.08em" }}>
-                      GROUNDED RESPONSE · {cat.label.toUpperCase()}
-                    </span>
-                  </div>
-                  <div className="aegis-stamp" style={{ border: `1.5px solid ${C.success}`, color: C.success, borderRadius: "4px", padding: "1px 6px", fontSize: "9px", fontWeight: 700, letterSpacing: "0.05em" }}>
-                    VERIFIED
-                  </div>
-                </div>
-
-                {/* Grounded text output */}
-                <div style={{ color: C.text, fontSize: "13.5px", lineHeight: "1.6" }}>
-                  {Array.isArray(m.answer) ? (
-                    <ul style={{ margin: 0, paddingLeft: "18px" }}>
-                      {m.answer.map((line, i) => (
-                        <li key={i} style={{ marginBottom: "6px" }}>{maskSensitive(line)}</li>
-                      ))}
-                    </ul>
-                  ) : (
-                    <div style={{ whiteSpace: "pre-wrap" }}>{maskSensitive(m.answer)}</div>
-                  )}
-                </div>
-
-                {/* Citations list & Confidence Indicator */}
-                {((m.citations && m.citations.length > 0) || m.confidence !== undefined) && (
-                  <div
-                    style={{
-                      marginTop: "16px",
-                      borderTop: `1px solid ${C.borderSoft}`,
-                      paddingTop: "14px",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "space-between",
-                      flexWrap: "wrap",
-                      gap: "10px",
-                    }}
-                  >
-                    <div style={{ display: "flex", flexWrap: "wrap", gap: "6px" }}>
-                      {(m.citations || []).map((c, i) => (
-                        <span
-                          key={i}
-                          className="aegis-mono"
-                          style={{
-                            display: "inline-flex",
-                            alignItems: "center",
-                            gap: "5px",
-                            fontSize: "10.5px",
-                            padding: "3px 8px",
-                            borderRadius: "6px",
-                            border: `1px solid ${C.border}`,
-                            background: C.panel2,
-                            color: C.muted,
-                          }}
-                        >
-                          <FileText size={11} color={C.teal} /> {c}
-                        </span>
-                      ))}
-                    </div>
-                    {m.confidence !== undefined && (
-                      <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                        <span className="aegis-mono" style={{ fontSize: "10.5px", color: C.muted }}>RELEVANCE</span>
-                        <ConfidenceBar score={m.confidence} />
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-            </div>
-          );
-        })}
-      </div>
-
-      {/* Input container */}
-      <div style={{ padding: "16px 24px 20px 24px", borderTop: `1px solid ${C.borderSoft}`, background: C.bg }}>
-        <div style={{ display: "flex", gap: "10px" }}>
-          <input
-            className="aegis-input"
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && !loading && handleSend()}
-            placeholder="Search documents or audit logs (e.g. WFH policy or CPU usage)..."
-            disabled={loading}
-            style={{ padding: "12px 14px", fontSize: "13.5px" }}
-          />
-          <button
-            onClick={() => handleSend()}
-            disabled={loading || !input.trim()}
-            className="aegis-btn aegis-btn-primary"
-            style={{ padding: "12px 20px" }}
-          >
-            {loading ? <Loader2 size={15} className="aegis-spin" /> : <Send size={15} />}
-            <span>Ask AEGIS</span>
-          </button>
+          })}
         </div>
-        <div style={{ marginTop: "10px", fontSize: "11px", color: C.dark, display: "flex", alignItems: "center", gap: "6px" }}>
-          <CheckCircle2 size={13} color={C.success} />
-          <span>
-            {live
-              ? `RBAC enforcement queries running on FastAPI port: ${apiBase}`
-              : "Sandbox Simulator mode — query intent and access scopes evaluated locally."}
-          </span>
+
+        {/* Input container */}
+        <div
+          style={{
+            padding: "16px 24px 20px 24px",
+            borderTop: `1px solid rgba(255, 255, 255, 0.06)`,
+            background: "rgba(3, 7, 18, 0.5)",
+            backdropFilter: "blur(8px)"
+          }}
+        >
+          <div style={{ display: "flex", gap: "10px" }}>
+            <input
+              className="aegis-input"
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && !loading && handleSend()}
+              placeholder="Query documents index (e.g. customer data retention or system CPU)..."
+              disabled={loading}
+              style={{
+                padding: "12px 14px",
+                fontSize: "13.5px",
+                borderRadius: "10px",
+                background: "rgba(0, 0, 0, 0.25)"
+              }}
+            />
+            <button
+              onClick={() => handleSend()}
+              disabled={loading || !input.trim()}
+              className="aegis-btn aegis-btn-primary"
+              style={{ padding: "12px 20px", borderRadius: "10px", flexShrink: 0 }}
+            >
+              {loading ? <Loader2 size={15} className="aegis-spin" /> : <Send size={14} />}
+              <span>Ask AEGIS</span>
+            </button>
+          </div>
+          <div style={{ marginTop: "10px", fontSize: "11px", color: C.muted, display: "flex", alignItems: "center", gap: "6px" }}>
+            <CheckCircle2 size={12} color={C.success} />
+            <span>
+              {live
+                ? `RBAC enforcement queries active on FastAPI gateway: ${apiBase}`
+                : "Sandbox Simulator mode — query intent and access scopes evaluated locally."}
+            </span>
+          </div>
         </div>
       </div>
     </div>

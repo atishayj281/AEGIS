@@ -21,18 +21,18 @@ export const INJECTION_PATTERN = /ignore (all |previous |any )?instructions|reve
 
 /* Colors Palette */
 export const C = {
-  bg: "#06090e",
-  panel: "#0e1420",
-  panel2: "#151c2c",
-  border: "#1e293b",
-  borderSoft: "#141c2c",
-  gold: "#e2b857",
-  teal: "#38bdf8",
-  text: "#f1f5f9",
-  muted: "#94a3b8",
+  bg: "#030712",
+  panel: "rgba(15, 23, 42, 0.45)",
+  panel2: "rgba(30, 41, 59, 0.6)",
+  border: "rgba(255, 255, 255, 0.08)",
+  borderSoft: "rgba(255, 255, 255, 0.04)",
+  gold: "#f59e0b",
+  teal: "#06b6d4",
+  text: "#f3f4f6",
+  muted: "#9ca3af",
   success: "#10b981",
-  danger: "#ef4444",
-  info: "#0284c7",
+  danger: "#f43f5e",
+  info: "#3b82f6",
 };
 
 /* Data categories in alignment with backend DataSource Enum */
@@ -67,10 +67,20 @@ export function categoryInfo(key) {
 
 /* Roles with specific data sources categories, fully mapping backend ROLE_PERMISSIONS */
 export const ROLES = {
+  platform_admin: {
+    label: "Platform Superuser",
+    categories: Object.keys(CATEGORIES),
+    accent: "#a855f7",
+  },
   admin: {
     label: "Administrator",
     categories: Object.keys(CATEGORIES),
     accent: C.gold,
+  },
+  team_lead: {
+    label: "Team Lead",
+    categories: Object.keys(CATEGORIES),
+    accent: "#ec4899",
   },
   compliance_officer: {
     label: "Compliance Officer",
@@ -85,7 +95,7 @@ export const ROLES = {
   operations_engineer: {
     label: "Operations Engineer",
     categories: ["monitoring_logs", "infrastructure_reports", "system_metrics", "operational_datasets", "audit_logs", "public_policies"],
-    accent: "#06b6d4", // Operations Cyan
+    accent: C.teal,
   },
   employee: {
     label: "Employee",
@@ -96,7 +106,9 @@ export const ROLES = {
 
 export function normalizeRole(rawRole, username) {
   const s = `${rawRole || ""} ${username || ""}`.toLowerCase();
-  if (s.includes("admin")) return "admin";
+  if (s.includes("platform_admin")) return "platform_admin";
+  if (s.includes("org_admin") || s.includes("admin")) return "admin";
+  if (s.includes("team_lead") || s.includes("lead")) return "team_lead";
   if (s.includes("compliance")) return "compliance_officer";
   if (s.includes("finance")) return "finance_analyst";
   if (s.includes("ops") || s.includes("operation") || s.includes("engineer")) return "operations_engineer";
@@ -118,11 +130,12 @@ export function ClassificationBadge({ classification }) {
       style={{
         fontSize: "10px",
         letterSpacing: "0.08em",
-        padding: "2px 8px",
-        borderRadius: "4px",
-        border: `1px solid ${color}55`,
+        padding: "3px 8px",
+        borderRadius: "6px",
+        border: `1px solid ${color}44`,
         color,
-        background: `${color}14`,
+        background: `${color}0F`,
+        backdropFilter: "blur(4px)",
         fontWeight: 600,
         whiteSpace: "nowrap",
       }}
@@ -145,10 +158,10 @@ export function ConfidenceBar({ score }) {
   
   return (
     <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-      <div style={{ width: "90px", height: "6px", borderRadius: "4px", background: "#151c2c", overflow: "hidden" }}>
-        <div style={{ width: `${Math.max(0, Math.min(100, percent))}%`, height: "100%", background: color, borderRadius: "4px" }} />
+      <div style={{ width: "80px", height: "6px", borderRadius: "3px", background: "rgba(255,255,255,0.05)", overflow: "hidden" }}>
+        <div style={{ width: `${Math.max(0, Math.min(100, percent))}%`, height: "100%", background: color, borderRadius: "3px" }} />
       </div>
-      <span className="aegis-mono" style={{ fontSize: "12px", color, fontWeight: 600 }}>{displayScore}%</span>
+      <span className="aegis-mono" style={{ fontSize: "11.5px", color, fontWeight: 600 }}>{displayScore}%</span>
     </div>
   );
 }
@@ -162,31 +175,33 @@ export function RoleBadge({ roleKey, username }) {
         display: "flex",
         alignItems: "center",
         gap: "10px",
-        padding: "10px 14px",
-        border: `1px solid ${C.border}`,
-        borderRadius: "10px",
-        background: C.panel2,
+        padding: "8px 12px",
+        border: `1px solid rgba(255, 255, 255, 0.06)`,
+        borderRadius: "12px",
+        background: "rgba(255, 255, 255, 0.02)",
+        backdropFilter: "blur(6px)",
+        boxShadow: "0 4px 12px rgba(0, 0, 0, 0.1)",
       }}
     >
       <div
         style={{
-          width: "28px",
-          height: "28px",
+          width: "26px",
+          height: "26px",
           borderRadius: "8px",
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
-          background: `${role.accent}1A`,
-          border: `1px solid ${role.accent}55`,
+          background: `${role.accent}14`,
+          border: `1px solid ${role.accent}40`,
         }}
       >
-        <Shield size={15} color={role.accent} />
+        <Shield size={14} color={role.accent} />
       </div>
-      <div style={{ overflow: "hidden" }}>
-        <div className="aegis-mono" style={{ fontSize: "10px", color: C.muted, letterSpacing: "0.06em" }}>
+      <div style={{ overflow: "hidden", lineHeight: "1.2" }}>
+        <div className="aegis-mono" style={{ fontSize: "9px", color: C.muted, letterSpacing: "0.06em", fontWeight: 600 }}>
           {role.label.toUpperCase()}
         </div>
-        <div style={{ fontSize: "12.5px", fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", color: C.text }}>
+        <div style={{ fontSize: "12px", fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", color: C.text, marginTop: "1px" }}>
           {username}
         </div>
       </div>
@@ -198,13 +213,28 @@ export function ConnectionPill({ status, apiBase }) {
   const map = {
     connected: { color: C.success, icon: Wifi, label: "Connected" },
     error: { color: C.danger, icon: WifiOff, label: "Unreachable" },
-    demo: { color: C.muted, icon: Sparkles, label: "Demo mode" },
+    demo: { color: C.muted, icon: Sparkles, label: "Sandbox mode" },
     checking: { color: C.muted, icon: Loader2, label: "Checking…" },
   };
   const m = map[status] || map.demo;
   const Icon = m.icon;
   return (
-    <div title={apiBase} style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "11px", color: m.color, fontWeight: 500 }}>
+    <div
+      title={apiBase}
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: "6px",
+        fontSize: "11px",
+        color: m.color,
+        fontWeight: 500,
+        padding: "6px 10px",
+        borderRadius: "10px",
+        background: `${m.color}0A`,
+        border: `1px solid ${m.color}20`,
+        backdropFilter: "blur(4px)",
+      }}
+    >
       <Icon size={12} className={status === "checking" ? "aegis-spin" : ""} /> {m.label}
     </div>
   );

@@ -6,12 +6,10 @@ export default function UploadModal({ onClose, onCreate, allowedCategories, busy
   const [tab, setTab] = useState("file"); // 'file' | 'text'
   const [category, setCategory] = useState(allowedCategories[0] || "public_policies");
 
-  // File upload state
   const [selectedFile, setSelectedFile] = useState(null);
   const [dragActive, setDragActive] = useState(false);
   const fileInputRef = useRef(null);
 
-  // Text editor state
   const [textName, setTextName] = useState("");
   const [textContent, setTextContent] = useState("");
 
@@ -71,30 +69,38 @@ export default function UploadModal({ onClose, onCreate, allowedCategories, busy
 
   return (
     <div className="aegis-modal-overlay" onDragEnter={handleDrag}>
-      <div className="aegis-modal-content" style={{ maxWidth: "520px" }}>
+      <div className="aegis-modal-content" style={{ maxWidth: "520px", background: "rgba(15, 23, 42, 0.75)" }}>
+        
         {/* Header */}
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "20px" }}>
           <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-            <div style={{ width: "36px", height: "36px", borderRadius: "8px", background: "rgba(226,184,87,0.08)", border: "1px solid rgba(226,184,87,0.3)", display: "flex", alignItems: "center", justifyContent: "center" }}>
-              <Upload size={18} color={C.gold} />
+            <div style={{ width: "36px", height: "36px", borderRadius: "8px", background: "rgba(245,158,11,0.06)", border: "1px solid rgba(245,158,11,0.25)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+              <Upload size={16} color={C.gold} />
             </div>
-            <h3 className="aegis-display" style={{ margin: 0, fontSize: "18px", color: C.text, fontWeight: 700 }}>
+            <h3 className="aegis-display" style={{ margin: 0, fontSize: "17px", color: C.text, fontWeight: 700 }}>
               Ingest Enterprise Data
             </h3>
           </div>
           <button onClick={onClose} className="aegis-btn" style={{ padding: "6px", background: "transparent", border: "none", color: C.muted }}>
-            <X size={20} />
+            <X size={18} />
           </button>
         </div>
 
         {/* Tab selection */}
-        <div style={{ display: "flex", gap: "4px", marginBottom: "18px", background: "rgba(6,9,14,0.4)", border: `1px solid ${C.border}`, borderRadius: "10px", padding: "3px" }}>
-          {[{ key: "file", label: "Upload File", icon: Upload }, { key: "text", label: "Paste Text", icon: ClipboardList }].map((t) => {
+        <div style={{ display: "flex", gap: "4px", marginBottom: "18px", background: "rgba(255,255,255,0.02)", border: `1px solid ${C.border}`, borderRadius: "10px", padding: "3px" }}>
+          {[
+            { key: "file", label: "Upload File", icon: Upload },
+            { key: "text", label: "Paste Text", icon: ClipboardList }
+          ].map((t) => {
             const Icon = t.icon;
             return (
               <button key={t.key} onClick={() => { setTab(t.key); setError(null); }} className="aegis-btn"
-                style={{ flex: 1, padding: "8px 12px", borderRadius: "7px", border: "none", cursor: "pointer", fontSize: "12.5px", background: tab === t.key ? "var(--bg-panel-hover)" : "transparent", color: tab === t.key ? C.text : C.muted }}>
-                <Icon size={13} /> {t.label}
+                style={{
+                  flex: 1, padding: "8px 12px", borderRadius: "7px", border: "none", cursor: "pointer", fontSize: "12.5px",
+                  background: tab === t.key ? "rgba(255, 255, 255, 0.05)" : "transparent",
+                  color: tab === t.key ? C.text : C.muted
+                }}>
+                <Icon size={12} /> {t.label}
               </button>
             );
           })}
@@ -102,7 +108,7 @@ export default function UploadModal({ onClose, onCreate, allowedCategories, busy
 
         {/* Error banner */}
         {error && (
-          <div style={{ display: "flex", gap: "8px", background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.3)", borderRadius: "8px", padding: "10px 12px", marginBottom: "16px", fontSize: "12px", color: C.danger }}>
+          <div style={{ display: "flex", gap: "8px", background: "rgba(244,63,94,0.08)", border: "1px solid rgba(244,63,94,0.25)", borderRadius: "8px", padding: "10px 12px", marginBottom: "16px", fontSize: "12px", color: C.danger }}>
             <AlertTriangle size={15} style={{ flexShrink: 0, marginTop: "1px" }} /> {error}
           </div>
         )}
@@ -117,16 +123,16 @@ export default function UploadModal({ onClose, onCreate, allowedCategories, busy
               onClick={() => fileInputRef.current.click()} style={{ minHeight: "150px", justifyContent: "center" }}>
               {selectedFile ? (
                 <>
-                  <FileText size={36} color={C.teal} />
-                  <div style={{ fontWeight: 600, fontSize: "14px", color: C.text, wordBreak: "break-all" }}>{selectedFile.name}</div>
+                  <FileText size={32} color={C.teal} />
+                  <div style={{ fontWeight: 600, fontSize: "13.5px", color: C.text, wordBreak: "break-all", padding: "0 10px" }}>{selectedFile.name}</div>
                   <div className="aegis-mono" style={{ fontSize: "11px", color: C.muted }}>
                     {(selectedFile.size / 1024).toFixed(0)} KB · Click to change
                   </div>
                 </>
               ) : (
                 <>
-                  <Upload size={32} color={C.muted} style={{ opacity: 0.5 }} />
-                  <div style={{ fontWeight: 500, fontSize: "13.5px", color: C.text }}>
+                  <Upload size={28} color={C.muted} style={{ opacity: 0.5 }} />
+                  <div style={{ fontWeight: 500, fontSize: "13px", color: C.text }}>
                     Drag & Drop, or <span style={{ color: C.gold, textDecoration: "underline" }}>Browse</span>
                   </div>
                   <div style={{ fontSize: "11px", color: C.muted }}>PDF, Word, Excel, CSV, JSON, Images · Max 10 MB</div>
@@ -140,10 +146,10 @@ export default function UploadModal({ onClose, onCreate, allowedCategories, busy
             <input className="aegis-input" type="text" value={textName} onChange={(e) => setTextName(e.target.value)}
               placeholder="e.g. policy_memo.txt" style={{ marginBottom: "14px" }} />
             <label style={{ fontSize: "11.5px", color: C.muted, fontWeight: 500, display: "block", marginBottom: "4px" }}>Document Content</label>
-            <textarea className="aegis-textarea aegis-scroll" rows={6} value={textContent}
+            <textarea className="aegis-textarea aegis-scroll" rows={5} value={textContent}
               onChange={(e) => setTextContent(e.target.value)}
-              placeholder="Paste the document text to be parsed, chunked, and vectorized into the search index..."
-              style={{ resize: "vertical", width: "100%" }} />
+              placeholder="Paste document text to be chunked, parsed, and vectorized into the index..."
+              style={{ resize: "vertical", width: "100%", background: "rgba(0,0,0,0.2)" }} />
           </div>
         )}
 
@@ -158,10 +164,10 @@ export default function UploadModal({ onClose, onCreate, allowedCategories, busy
         </div>
 
         {/* Actions */}
-        <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", borderTop: `1px solid ${C.borderSoft}`, paddingTop: "16px" }}>
-          <button onClick={onClose} className="aegis-btn" style={{ color: C.muted, background: "transparent" }}>Cancel</button>
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", borderTop: `1px solid rgba(255,255,255,0.06)`, paddingTop: "16px" }}>
+          <button onClick={onClose} className="aegis-btn" style={{ color: C.muted, background: "transparent", borderColor: "transparent" }}>Cancel</button>
           <button disabled={busy || !canSubmit} onClick={handleSubmit} className="aegis-btn aegis-btn-primary">
-            {busy ? <><Loader2 size={14} className="aegis-spin" /> Embedding…</> : <><Upload size={14} /> Add to Vault</>}
+            {busy ? <><Loader2 size={14} className="aegis-spin" /> Vectorizing…</> : <><Upload size={13} /> Add to Vault</>}
           </button>
         </div>
       </div>
