@@ -8,5 +8,6 @@
   "report.pdf": "compliance_records",
   "guide.docx": "public_policies",
   "salaries.xlsx": "salary_records",
-  "datacenter.jpg": "infrastructure_reports"
+  "datacenter.jpg": "infrastructure_reports",
+  "Enterprise_RAG_Implementation_Plan.docx": "pdf_documents"
 }

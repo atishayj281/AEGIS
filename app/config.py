@@ -51,8 +51,8 @@ class Settings(BaseSettings):
         "",
     )
 
-    openai_api_key: str | None = None
-    openai_model: str = "gpt-4o-mini"
+    gemini_api_key: str | None = None
+    gemini_model: str = "gemini-1.5-flash"
 
     max_retrieval_results: int = 8
     retrieval_timeout_seconds: float = 2.0
